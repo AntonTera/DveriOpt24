@@ -42,11 +42,33 @@ npm run dev
 
 - [supabase/migrations/0001_dveri_opt_init.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0001_dveri_opt_init.sql)
 
+## Запуск очереди через n8n
+
+На бесплатном плане Vercel cron нельзя запускать чаще одного раза в день, поэтому этот проект рассчитан на внешний триггер из `n8n`.
+
+Что настроить:
+
+1. Добавить в Vercel переменную `CRON_SECRET`.
+2. В `n8n` создать `Schedule Trigger`.
+3. После него вызвать `GET` или `POST` на endpoint:
+
+```text
+https://<your-project>.vercel.app/api/cron/process-queue
+```
+
+4. Передать заголовок:
+
+```text
+Authorization: Bearer <CRON_SECRET>
+```
+
+Рекомендуемый интервал в `n8n`: раз в 1-5 минут.
+
 ## Vercel
 
 - в проекте нужен `CRON_SECRET`
-- cron настроен в [vercel.json](/Users/antonterentev/Documents/DveriOpt24/vercel.json)
-- production cron вызывает `/api/cron/process-queue`
+- файл [vercel.json](/Users/antonterentev/Documents/DveriOpt24/vercel.json) больше не содержит встроенный Vercel Cron
+- очередь запускается внешним scheduler-ом, например `n8n`
 
 ## Важно по безопасности
 
