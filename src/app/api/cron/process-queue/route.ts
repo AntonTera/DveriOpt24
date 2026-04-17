@@ -31,11 +31,16 @@ export async function GET(request: Request) {
   try {
     return await handleQueueRun(request);
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
     logError("Queue processing failed", {
-      error: error instanceof Error ? error.message : "Unknown error"
+      error: errorMessage
     });
 
-    return Response.json({ ok: false, error: "Queue processing failed" }, { status: 500 });
+    return Response.json(
+      { ok: false, error: "Queue processing failed", details: errorMessage },
+      { status: 500 }
+    );
   }
 }
 

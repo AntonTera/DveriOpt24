@@ -42,6 +42,9 @@ npm run dev
 
 - [supabase/migrations/0001_dveri_opt_init.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0001_dveri_opt_init.sql)
 
+Для server-side вызовов нужен именно `service_role` ключ Supabase.
+`anon`/public key для очереди не подойдёт: RPC `dveri_opt_claim_*` и запись в служебные таблицы будут падать.
+
 ## Запуск очереди через n8n
 
 На бесплатном плане Vercel cron нельзя запускать чаще одного раза в день, поэтому этот проект рассчитан на внешний триггер из `n8n`.

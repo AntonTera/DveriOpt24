@@ -14,8 +14,38 @@ const serverEnvSchema = z.object({
   CRON_SECRET: z.string().optional()
 });
 
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    const payload = parts[1];
+    const normalized = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), "=");
+    const decoded = Buffer.from(normalized, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded);
+
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function assertSupabaseServiceRoleKey(key: string) {
+  const payload = parseJwtPayload(key);
+  const role = typeof payload?.role === "string" ? payload.role : null;
+
+  if (role && role !== "service_role") {
+    throw new Error(
+      `SUPABASE_SERVICE_ROLE_KEY must be a Supabase service_role key, but received role "${role}".`
+    );
+  }
+}
+
 export function getServerEnv() {
   const env = serverEnvSchema.parse(process.env);
+  assertSupabaseServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY);
 
   return {
     ...env,
