@@ -31,6 +31,11 @@ export const TYPE_OBJECT_ENUMS = {
   "Козырьки": 743144
 } as const;
 
+export const ALLOWED_RESPONSIBLE_USER_NAMES = new Set([
+  "Филипп",
+  "Людмила"
+]);
+
 export const KPI_FIELD_IDS = {
   work: {
     date: 1164525,

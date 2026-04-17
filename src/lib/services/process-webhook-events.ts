@@ -1,4 +1,4 @@
-import { MAIN_PIPELINE_ID } from "@/lib/constants/amocrm";
+import { ALLOWED_RESPONSIBLE_USER_NAMES, MAIN_PIPELINE_ID } from "@/lib/constants/amocrm";
 import { fetchLead, fetchUserName, patchLeadCustomFields } from "@/lib/amocrm/client";
 import { buildSheetSyncJobs, deriveLeadKpiState } from "@/lib/domain/kpi";
 import {
@@ -25,6 +25,17 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
   }
 
   const managerName = await fetchUserName(lead.responsibleUserId);
+
+  if (!ALLOWED_RESPONSIBLE_USER_NAMES.has(managerName)) {
+    logInfo("Skipping deal from unsupported responsible user", {
+      dealId: lead.id,
+      responsibleUserId: lead.responsibleUserId,
+      managerName
+    });
+    await markWebhookEventProcessed(event.id);
+    return;
+  }
+
   const nextState = deriveLeadKpiState({
     lead,
     previousState,
