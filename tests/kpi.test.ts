@@ -7,6 +7,7 @@ function buildLead(overrides: Partial<AmoLeadSnapshot>): AmoLeadSnapshot {
   return {
     id: 1,
     name: "Тестовая сделка",
+    budget: 125000,
     pipelineId: 4908391,
     statusId: 44423710,
     responsibleUserId: 12043998,
@@ -25,7 +26,7 @@ describe("deriveLeadKpiState", () => {
       managerName: "Людмила"
     });
 
-    expect(state.activeKpis.work?.amount).toBe(500);
+    expect(state.activeKpis.work?.amount).toBe(10000);
     expect(state.sheetRowsKpNew).toHaveLength(1);
     expect(state.sheetRowsKpNew[0].kpiLabel).toBe("В работу");
   });
@@ -39,7 +40,7 @@ describe("deriveLeadKpiState", () => {
         work: {
           stage: "work",
           label: "В работу",
-          amount: 500,
+          amount: 10000,
           date: "17.04.2026",
           time: "12:00",
           manager: "Людмила"
@@ -54,7 +55,7 @@ describe("deriveLeadKpiState", () => {
             time: "12:00",
             kpiLabel: "В работу",
             leadName: "Тестовая сделка",
-            amount: 500,
+            amount: 10000,
             link: "https://dveriopt24.amocrm.ru/leads/detail/1",
             dealId: 1,
             installDate: null
@@ -79,8 +80,8 @@ describe("deriveLeadKpiState", () => {
     });
 
     expect(nextState.activeKpis.work).toBeUndefined();
-    expect(nextState.activeKpis.measure?.amount).toBe(1000);
-    expect(nextState.activeKpis.install?.amount).toBe(1000);
+    expect(nextState.activeKpis.measure?.amount).toBe(10000);
+    expect(nextState.activeKpis.install?.amount).toBe(10000);
 
     const jobs = buildSheetSyncJobs({
       lead,
@@ -101,7 +102,7 @@ describe("deriveLeadKpiState", () => {
         measure: {
           stage: "measure",
           label: "Замер",
-          amount: 1000,
+          amount: 10000,
           date: "17.04.2026",
           time: "12:00",
           manager: "Людмила"
@@ -109,7 +110,7 @@ describe("deriveLeadKpiState", () => {
         install: {
           stage: "install",
           label: "Монтаж",
-          amount: 1000,
+          amount: 10000,
           date: "18.04.2026",
           time: "12:30",
           manager: "Людмила"
@@ -132,8 +133,8 @@ describe("deriveLeadKpiState", () => {
     });
 
     expect(state.objectType).toBe("Входная");
-    expect(state.activeKpis.measure?.amount).toBe(1000);
-    expect(state.activeKpis.install?.amount).toBe(1000);
+    expect(state.activeKpis.measure?.amount).toBe(10000);
+    expect(state.activeKpis.install?.amount).toBe(10000);
   });
 
   it("zeroes monetary KPI on refusal but keeps no active stages", () => {
@@ -145,7 +146,7 @@ describe("deriveLeadKpiState", () => {
         install: {
           stage: "install",
           label: "Монтаж",
-          amount: 1000,
+          amount: 10000,
           date: "18.04.2026",
           time: "12:30",
           manager: "Людмила"
@@ -160,7 +161,7 @@ describe("deriveLeadKpiState", () => {
             time: "12:30",
             kpiLabel: "Монтаж",
             leadName: "Тестовая сделка",
-            amount: 1000,
+            amount: 10000,
             link: "https://dveriopt24.amocrm.ru/leads/detail/1",
             dealId: 1,
             installDate: "18.04.2026"
@@ -176,7 +177,7 @@ describe("deriveLeadKpiState", () => {
             time: null,
             kpiLabel: "Монтаж",
             leadName: "Тестовая сделка",
-            amount: 1000,
+            amount: 10000,
             link: "https://dveriopt24.amocrm.ru/leads/detail/1",
             dealId: 1,
             installDate: "18.04.2026"

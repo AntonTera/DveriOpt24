@@ -54,22 +54,22 @@ export const KPI_FIELD_IDS = {
   }
 } as const;
 
-export const OBJECT_TYPE_RULES: Record<string, Partial<Record<KpiStage, number>>> = {
+export const OBJECT_TYPE_RULES: Record<string, Partial<Record<KpiStage, true>>> = {
   "Входная": {
-    measure: 1000,
-    install: 1000
+    measure: true,
+    install: true
   },
   "Межкомнатная": {
-    work: 100
+    work: true
   },
   "Откосы": {
-    work: 200
+    work: true
   },
   "Козырьки": {
-    work: 300
+    work: true
   },
   "Входная нестандарт": {
-    work: 500
+    work: true
   }
 };
 

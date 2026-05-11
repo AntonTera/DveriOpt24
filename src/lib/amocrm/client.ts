@@ -9,6 +9,7 @@ import { displayDateToUnix } from "@/lib/utils/datetime";
 interface AmoLeadResponse {
   id: number;
   name: string;
+  price?: number | null;
   pipeline_id: number;
   status_id: number;
   responsible_user_id: number | null;
@@ -63,6 +64,7 @@ export async function fetchLead(leadId: number): Promise<AmoLeadSnapshot> {
   return {
     id: lead.id,
     name: lead.name,
+    budget: typeof lead.price === "number" && Number.isFinite(lead.price) ? lead.price : 0,
     pipelineId: lead.pipeline_id,
     statusId: lead.status_id,
     responsibleUserId: lead.responsible_user_id,

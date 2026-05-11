@@ -22,6 +22,7 @@ export interface LeadChangeEvent {
 export interface AmoLeadSnapshot {
   id: number;
   name: string;
+  budget: number;
   pipelineId: number;
   statusId: number;
   responsibleUserId: number | null;

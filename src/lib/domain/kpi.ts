@@ -51,6 +51,12 @@ function createSheetRow(lead: AmoLeadSnapshot, record: ActiveKpiRecord): SheetRo
   };
 }
 
+function calculateKpiAmount(budget: number): number {
+  const normalizedBudget = Number.isFinite(budget) ? Math.max(0, budget) : 0;
+
+  return Math.round(normalizedBudget * 0.08);
+}
+
 function buildActiveKpis(
   lead: AmoLeadSnapshot,
   previousState: StoredDealState | null,
@@ -65,10 +71,10 @@ function buildActiveKpis(
   }
 
   const statusSort = getStatusSort(lead.statusId);
+  const amount = calculateKpiAmount(lead.budget);
 
   for (const stage of KPI_STAGE_ORDER) {
-    const configuredAmount = rule[stage];
-    if (!configuredAmount) {
+    if (!rule[stage]) {
       continue;
     }
 
@@ -76,7 +82,7 @@ function buildActiveKpis(
       continue;
     }
 
-    activeKpis[stage] = buildStageRecord(stage, configuredAmount, previousState, processedAt, managerName);
+    activeKpis[stage] = buildStageRecord(stage, amount, previousState, processedAt, managerName);
   }
 
   return activeKpis;

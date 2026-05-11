@@ -11,6 +11,7 @@ Vercel/Next.js backend для обработки webhook-событий amoCRM, 
   - статусов сделки
   - freeze после `Комиссия получена`
   - обнуления денежных KPI при `Отказ`
+- сумма KPI считается как `8%` от бюджета сделки amoCRM
 - синхронизация KPI-полей в amoCRM
 - очередь записи в `KP new` и `ЗП new` с retry/backoff
 - миграция Supabase с таблицами `dveri_opt_*`
