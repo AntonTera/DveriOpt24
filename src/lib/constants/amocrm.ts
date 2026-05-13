@@ -1,5 +1,7 @@
 import { KpiStage } from "@/lib/types";
 
+export type AmoKpiStage = KpiStage;
+
 export const AMOCRM_ACCOUNT_BASE_URL = "https://dveriopt24.amocrm.ru";
 export const MAIN_PIPELINE_ID = 4908391;
 
@@ -31,10 +33,12 @@ export const TYPE_OBJECT_ENUMS = {
   "Козырьки": 743144
 } as const;
 
-export const ALLOWED_RESPONSIBLE_USER_NAMES = new Set([
-  "Филипп",
-  "Людмила"
-]);
+export const ALLOWED_RESPONSIBLE_USER_NAMES = new Set(["Филипп", "Людмила"]);
+export const EXCLUDED_RESPONSIBLE_USER_ID = 8445565;
+export const AMO_KPI_MANAGER_NAME_BY_USER_ID: Record<number, string> = {
+  7268314: "Филипп",
+  12043998: "Людмила"
+};
 
 export const KPI_FIELD_IDS = {
   work: {
@@ -107,6 +111,18 @@ export const SALARY_TRIGGER_STATUS_IDS = new Set<number>([
   AMO_STATUS.SALARY_RECONCILED,
   AMO_STATUS.COMMISSION_RECEIVED
 ]);
+export const AMO_KPI_SUPPORTED_STATUS_IDS = new Set<number>([
+  AMO_STATUS.WORK,
+  AMO_STATUS.MEASURE,
+  AMO_STATUS.INSTALL,
+  AMO_STATUS.SALARY_RECONCILED,
+  AMO_STATUS.REFUSED
+]);
+export const AMO_KPI_STAGE_BY_STATUS: Partial<Record<number, AmoKpiStage>> = {
+  [AMO_STATUS.WORK]: "work",
+  [AMO_STATUS.MEASURE]: "measure",
+  [AMO_STATUS.INSTALL]: "install"
+};
 
 export function getStatusSort(statusId: number | null | undefined): number {
   if (!statusId) {

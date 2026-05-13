@@ -1,5 +1,11 @@
 import { ALLOWED_RESPONSIBLE_USER_NAMES, MAIN_PIPELINE_ID } from "@/lib/constants/amocrm";
 import { fetchLead, fetchUserName, patchLeadCustomFields } from "@/lib/amocrm/client";
+import {
+  buildAmoKpiPatch,
+  isExcludedResponsibleUser,
+  resolveManagerNameByUserId,
+  shouldHandleAmoKpiStatus
+} from "@/lib/domain/amocrm-kpi";
 import { buildSheetSyncJobs, deriveLeadKpiState } from "@/lib/domain/kpi";
 import {
   enqueueSheetJobs,
@@ -12,7 +18,15 @@ import { logInfo } from "@/lib/log";
 import { WebhookEventRecord } from "@/lib/types";
 
 export async function processWebhookEvent(event: WebhookEventRecord) {
-  const previousState = await getDealState(event.lead_id);
+  if (!shouldHandleAmoKpiStatus(event.status_id)) {
+    logInfo("Skipping webhook with unsupported status", {
+      dealId: event.lead_id,
+      statusId: event.status_id
+    });
+    await markWebhookEventProcessed(event.id);
+    return;
+  }
+
   const lead = await fetchLead(event.lead_id);
 
   if (lead.pipelineId !== MAIN_PIPELINE_ID) {
@@ -24,11 +38,47 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
     return;
   }
 
+  if (isExcludedResponsibleUser(lead.responsibleUserId)) {
+    logInfo("Skipping deal from excluded responsible user", {
+      dealId: lead.id,
+      responsibleUserId: lead.responsibleUserId,
+      statusId: event.status_id
+    });
+    await markWebhookEventProcessed(event.id);
+    return;
+  }
+
+  const mappedManagerName = resolveManagerNameByUserId(lead.responsibleUserId);
+  const amoKpiPatch = buildAmoKpiPatch({
+    lead,
+    statusId: event.status_id,
+    managerName: mappedManagerName
+  });
+
+  if (!amoKpiPatch) {
+    logInfo("Skipping amoCRM KPI update due to unresolved manager or scenario", {
+      dealId: lead.id,
+      statusId: event.status_id,
+      responsibleUserId: lead.responsibleUserId
+    });
+  } else {
+    await patchLeadCustomFields(lead.id, amoKpiPatch.mutations);
+    logInfo("Updated amoCRM KPI fields", {
+      dealId: lead.id,
+      statusId: event.status_id,
+      responsibleUserId: lead.responsibleUserId,
+      scenario: amoKpiPatch.scenario,
+      updatedFieldIds: amoKpiPatch.mutations.map((mutation) => mutation.fieldId)
+    });
+  }
+
+  const previousState = await getDealState(event.lead_id);
   const managerName = await fetchUserName(lead.responsibleUserId);
 
   if (!ALLOWED_RESPONSIBLE_USER_NAMES.has(managerName)) {
-    logInfo("Skipping deal from unsupported responsible user", {
+    logInfo("Skipping sheet sync for unsupported responsible user", {
       dealId: lead.id,
+      statusId: event.status_id,
       responsibleUserId: lead.responsibleUserId,
       managerName
     });
@@ -42,8 +92,6 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
     processedAt: event.received_at,
     managerName
   });
-
-  await patchLeadCustomFields(lead.id, nextState.amoFieldsPatch);
 
   const sheetJobs = buildSheetSyncJobs({
     lead,

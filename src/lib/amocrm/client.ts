@@ -10,6 +10,7 @@ interface AmoLeadResponse {
   id: number;
   name: string;
   price?: number | null;
+  updated_at?: number | null;
   pipeline_id: number;
   status_id: number;
   responsible_user_id: number | null;
@@ -57,6 +58,14 @@ function extractObjectType(lead: AmoLeadResponse): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function normalizeUpdatedAt(value: number | null | undefined): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
 export async function fetchLead(leadId: number): Promise<AmoLeadSnapshot> {
   const response = await amoFetch(`/api/v4/leads/${leadId}`);
   const lead = (await response.json()) as AmoLeadResponse;
@@ -65,6 +74,7 @@ export async function fetchLead(leadId: number): Promise<AmoLeadSnapshot> {
     id: lead.id,
     name: lead.name,
     budget: typeof lead.price === "number" && Number.isFinite(lead.price) ? lead.price : 0,
+    updatedAt: normalizeUpdatedAt(lead.updated_at),
     pipelineId: lead.pipeline_id,
     statusId: lead.status_id,
     responsibleUserId: lead.responsible_user_id,

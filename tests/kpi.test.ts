@@ -8,6 +8,7 @@ function buildLead(overrides: Partial<AmoLeadSnapshot>): AmoLeadSnapshot {
     id: 1,
     name: "Тестовая сделка",
     budget: 125000,
+    updatedAt: "2026-04-17T09:00:00.000Z",
     pipelineId: 4908391,
     statusId: 44423710,
     responsibleUserId: 12043998,

@@ -23,6 +23,7 @@ export interface AmoLeadSnapshot {
   id: number;
   name: string;
   budget: number;
+  updatedAt: string;
   pipelineId: number;
   statusId: number;
   responsibleUserId: number | null;
