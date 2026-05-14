@@ -136,16 +136,58 @@ export async function enqueueSheetJobs(
   }
 
   const supabase = getSupabaseAdmin();
-  const { error } = await supabase.from("dveri_opt_sheet_jobs").insert(
-    jobs.map((job) => ({
-      ...job,
-      status: "pending",
-      attempts: 0
-    }))
+  const rowKeys = [...new Set(jobs.map((job) => job.row_key))];
+  const { data: existingRows, error: existingError } = await supabase
+    .from("dveri_opt_sheet_jobs")
+    .select("id, row_key, status")
+    .in("row_key", rowKeys)
+    .in("status", ["pending", "retry"]);
+
+  if (existingError) {
+    throw new Error(`Failed to load existing sheet jobs: ${existingError.message}`);
+  }
+
+  const existingByRowKey = new Map(
+    ((existingRows ?? []) as Array<{ id: string; row_key: string; status: string }>).map((row) => [row.row_key, row])
   );
 
-  if (error) {
-    throw new Error(`Failed to enqueue sheet jobs: ${error.message}`);
+  const jobsToInsert = jobs.filter((job) => !existingByRowKey.has(job.row_key));
+  const jobsToRefresh = jobs.filter((job) => existingByRowKey.has(job.row_key));
+
+  if (jobsToInsert.length > 0) {
+    const { error } = await supabase.from("dveri_opt_sheet_jobs").insert(
+      jobsToInsert.map((job) => ({
+        ...job,
+        status: "pending",
+        attempts: 0
+      }))
+    );
+
+    if (error) {
+      throw new Error(`Failed to enqueue sheet jobs: ${error.message}`);
+    }
+  }
+
+  for (const job of jobsToRefresh) {
+    const existing = existingByRowKey.get(job.row_key);
+    if (!existing) {
+      continue;
+    }
+
+    const { error } = await supabase
+      .from("dveri_opt_sheet_jobs")
+      .update({
+        job_type: job.job_type,
+        payload: job.payload,
+        status: "pending",
+        next_run_at: null,
+        last_error: null
+      })
+      .eq("id", existing.id);
+
+    if (error) {
+      throw new Error(`Failed to refresh sheet job ${job.row_key}: ${error.message}`);
+    }
   }
 }
 

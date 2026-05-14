@@ -212,4 +212,83 @@ describe("deriveLeadKpiState", () => {
 
     expect(jobs.filter((job) => job.payload.row.amount === 0)).toHaveLength(2);
   });
+
+  it("does not create sheet jobs when rows are already synced and unchanged", () => {
+    const previousState: StoredDealState = {
+      deal_id: 1,
+      object_type: "Входная",
+      is_frozen: false,
+      active_kpis: {
+        measure: {
+          stage: "measure",
+          label: "Замер",
+          amount: 10000,
+          date: "17.04.2026",
+          time: "12:00",
+          manager: "Людмила"
+        },
+        install: {
+          stage: "install",
+          label: "Монтаж",
+          amount: 10000,
+          date: "17.04.2026",
+          time: "12:00",
+          manager: "Людмила"
+        }
+      },
+      kp_rows: {
+        measure: {
+          rowIndex: 246,
+          payload: {
+            stage: "measure",
+            date: "17.04.2026",
+            time: "12:00",
+            kpiLabel: "Замер",
+            leadName: "Тестовая сделка",
+            amount: 10000,
+            link: "https://dveriopt24.amocrm.ru/leads/detail/1",
+            dealId: 1,
+            installDate: null
+          }
+        },
+        install: {
+          rowIndex: 247,
+          payload: {
+            stage: "install",
+            date: "17.04.2026",
+            time: "12:00",
+            kpiLabel: "Монтаж",
+            leadName: "Тестовая сделка",
+            amount: 10000,
+            link: "https://dveriopt24.amocrm.ru/leads/detail/1",
+            dealId: 1,
+            installDate: "17.04.2026"
+          }
+        }
+      },
+      zp_rows: {},
+      last_status_id: 44616253,
+      last_synced_at: null
+    };
+
+    const lead = buildLead({
+      objectType: "Входная",
+      statusId: 44616253
+    });
+
+    const nextState = deriveLeadKpiState({
+      lead,
+      previousState,
+      processedAt: "2026-04-17T09:00:00.000Z",
+      managerName: "Людмила"
+    });
+
+    const jobs = buildSheetSyncJobs({
+      lead,
+      previousState,
+      nextState
+    });
+
+    expect(jobs).toEqual([]);
+  });
 });

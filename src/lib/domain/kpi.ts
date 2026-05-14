@@ -51,6 +51,14 @@ function createSheetRow(lead: AmoLeadSnapshot, record: ActiveKpiRecord): SheetRo
   };
 }
 
+function areSheetRowsEqual(left: SheetRowPayload | undefined, right: SheetRowPayload | undefined): boolean {
+  if (!left || !right) {
+    return false;
+  }
+
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function calculateKpiAmount(budget: number): number {
   const normalizedBudget = Number.isFinite(budget) ? Math.max(0, budget) : 0;
 
@@ -251,6 +259,10 @@ export function buildSheetSyncJobs(params: {
     const previous = previousKpRows[stage];
 
     if (desired) {
+      if (previous?.rowIndex && areSheetRowsEqual(previous.payload, desired)) {
+        continue;
+      }
+
       jobs.push({
         deal_id: lead.id,
         sheet_name: "KP new",
@@ -262,7 +274,7 @@ export function buildSheetSyncJobs(params: {
           row: desired
         }
       });
-    } else if (previous) {
+    } else if (previous && previous.payload.amount !== 0) {
       jobs.push({
         deal_id: lead.id,
         sheet_name: "KP new",
@@ -285,6 +297,10 @@ export function buildSheetSyncJobs(params: {
     const previous = previousZpRows[stage];
 
     if (desired) {
+      if (previous?.rowIndex && areSheetRowsEqual(previous.payload, desired)) {
+        continue;
+      }
+
       jobs.push({
         deal_id: lead.id,
         sheet_name: "ЗП new",
@@ -296,7 +312,7 @@ export function buildSheetSyncJobs(params: {
           row: desired
         }
       });
-    } else if (previous && lead.statusId === AMO_STATUS.REFUSED) {
+    } else if (previous && lead.statusId === AMO_STATUS.REFUSED && previous.payload.amount !== 0) {
       jobs.push({
         deal_id: lead.id,
         sheet_name: "ЗП new",
