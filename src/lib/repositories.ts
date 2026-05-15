@@ -9,6 +9,12 @@ function parseDealState(row: Record<string, unknown>): StoredDealState {
     active_kpis: (row.active_kpis as StoredDealState["active_kpis"]) ?? {},
     kp_rows: (row.kp_rows as StoredDealState["kp_rows"]) ?? {},
     zp_rows: (row.zp_rows as StoredDealState["zp_rows"]) ?? {},
+    last_budget:
+      row.last_budget === null || row.last_budget === undefined
+        ? null
+        : Number.isFinite(Number(row.last_budget))
+          ? Number(row.last_budget)
+          : null,
     last_status_id: (row.last_status_id as number | null) ?? null,
     last_synced_at: (row.last_synced_at as string | null) ?? null
   };
@@ -113,6 +119,7 @@ export async function upsertDealState(state: StoredDealState) {
     active_kpis: state.active_kpis,
     kp_rows: state.kp_rows,
     zp_rows: state.zp_rows,
+    last_budget: state.last_budget,
     last_status_id: state.last_status_id,
     last_synced_at: state.last_synced_at ?? new Date().toISOString()
   });

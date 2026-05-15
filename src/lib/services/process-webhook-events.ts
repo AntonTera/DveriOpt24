@@ -7,6 +7,7 @@ import {
   shouldHandleAmoKpiStatus
 } from "@/lib/domain/amocrm-kpi";
 import { buildSheetSyncJobs, deriveLeadKpiState } from "@/lib/domain/kpi";
+import { processBudgetWebhookEvent } from "@/lib/services/process-budget-webhook-events";
 import {
   enqueueSheetJobs,
   getDealState,
@@ -18,6 +19,11 @@ import { logInfo } from "@/lib/log";
 import { WebhookEventRecord } from "@/lib/types";
 
 export async function processWebhookEvent(event: WebhookEventRecord) {
+  if (event.event_type === "budget_sync") {
+    await processBudgetWebhookEvent(event);
+    return;
+  }
+
   if (!shouldHandleAmoKpiStatus(event.status_id)) {
     logInfo("Skipping webhook with unsupported status", {
       dealId: event.lead_id,
@@ -107,6 +113,7 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
     active_kpis: nextState.activeKpis,
     kp_rows: previousState?.kp_rows ?? {},
     zp_rows: previousState?.zp_rows ?? {},
+    last_budget: lead.budget,
     last_status_id: lead.statusId,
     last_synced_at: new Date().toISOString()
   });
