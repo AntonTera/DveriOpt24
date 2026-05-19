@@ -88,8 +88,8 @@ Authorization: Bearer <CRON_SECRET>
 
 По умолчанию:
 
-- `WEBHOOK_EVENTS_RETENTION_DAYS=7`
-- `SHEET_JOBS_RETENTION_DAYS=7`
+- `WEBHOOK_EVENTS_RETENTION_DAYS=1`
+- `SHEET_JOBS_RETENTION_DAYS=1`
 
 Дополнительно можно настроить размер батчей очистки:
 
