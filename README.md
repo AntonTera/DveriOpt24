@@ -46,10 +46,19 @@ npm run dev
 Для server-side вызовов нужен именно `service_role` ключ Supabase.
 `anon`/public key для очереди не подойдёт: RPC `dveri_opt_claim_*` и запись в служебные таблицы будут падать.
 
+Для вызовов amoCRM backend использует встроенный limiter и retry на временные ошибки API.
+Базовые настройки:
+
+- `AMOCRM_MIN_REQUEST_INTERVAL_MS=220`
+- `AMOCRM_MAX_RETRIES=4`
+- `AMOCRM_RETRY_BASE_DELAY_MS=500`
+- `AMOCRM_RETRY_MAX_DELAY_MS=5000`
+
 Примените также миграции очереди:
 
 - [supabase/migrations/0002_add_last_budget_to_deal_state.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0002_add_last_budget_to_deal_state.sql)
 - [supabase/migrations/0003_add_queue_history_cleanup.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0003_add_queue_history_cleanup.sql)
+- [supabase/migrations/0004_add_sheet_job_history_cleanup.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0004_add_sheet_job_history_cleanup.sql)
 
 ## Запуск очереди через n8n
 

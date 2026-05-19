@@ -4,6 +4,7 @@ import {
 } from "@/lib/constants/amocrm";
 import { getServerEnv } from "@/lib/env";
 import { AmoLeadSnapshot, AmoFieldMutation } from "@/lib/types";
+import { sleep } from "@/lib/utils/sleep";
 import { displayDateToUnix } from "@/lib/utils/datetime";
 
 interface AmoLeadResponse {
@@ -32,23 +33,114 @@ function getAuthHeaders() {
   };
 }
 
-async function amoFetch(path: string, init?: RequestInit) {
-  const env = getServerEnv();
-  const response = await fetch(`${env.AMOCRM_BASE_URL ?? AMOCRM_ACCOUNT_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      ...getAuthHeaders(),
-      ...(init?.headers ?? {})
-    },
-    cache: "no-store"
-  });
+const RETRYABLE_AMOCRM_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`amoCRM request failed (${response.status}): ${body}`);
+let amoRequestQueue: Promise<void> = Promise.resolve();
+let nextAllowedAmoRequestAt = 0;
+
+class AmoCrmResponseError extends Error {}
+
+function getRetryDelayMs(attempt: number, retryAfterHeader: string | null) {
+  const env = getServerEnv();
+
+  if (retryAfterHeader) {
+    const retryAfterSeconds = Number(retryAfterHeader);
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+      return Math.min(env.AMOCRM_RETRY_MAX_DELAY_MS, retryAfterSeconds * 1000);
+    }
+
+    const retryAfterDate = Date.parse(retryAfterHeader);
+    if (Number.isFinite(retryAfterDate)) {
+      return Math.min(env.AMOCRM_RETRY_MAX_DELAY_MS, Math.max(0, retryAfterDate - Date.now()));
+    }
   }
 
-  return response;
+  return Math.min(
+    env.AMOCRM_RETRY_MAX_DELAY_MS,
+    env.AMOCRM_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1)
+  );
+}
+
+async function waitForAmoRateLimitSlot() {
+  const env = getServerEnv();
+  const waitMs = Math.max(0, nextAllowedAmoRequestAt - Date.now());
+
+  if (waitMs > 0) {
+    await sleep(waitMs);
+  }
+
+  nextAllowedAmoRequestAt = Date.now() + env.AMOCRM_MIN_REQUEST_INTERVAL_MS;
+}
+
+async function runAmoRequestWithRateLimit<T>(request: () => Promise<T>) {
+  const scheduled = amoRequestQueue.then(async () => {
+    await waitForAmoRateLimitSlot();
+    return request();
+  });
+
+  amoRequestQueue = scheduled.then(
+    () => undefined,
+    () => undefined
+  );
+
+  return scheduled;
+}
+
+function isRetryableAmoFetchError(error: unknown) {
+  return error instanceof Error;
+}
+
+async function amoFetch(path: string, init?: RequestInit) {
+  const env = getServerEnv();
+  let attempt = 0;
+
+  while (attempt <= env.AMOCRM_MAX_RETRIES) {
+    attempt += 1;
+
+    try {
+      const response = await runAmoRequestWithRateLimit(() =>
+        fetch(`${env.AMOCRM_BASE_URL ?? AMOCRM_ACCOUNT_BASE_URL}${path}`, {
+          ...init,
+          headers: {
+            ...getAuthHeaders(),
+            ...(init?.headers ?? {})
+          },
+          cache: "no-store"
+        })
+      );
+
+      if (response.ok) {
+        return response;
+      }
+
+      const body = await response.text();
+      const canRetry =
+        RETRYABLE_AMOCRM_STATUS_CODES.has(response.status) &&
+        attempt <= env.AMOCRM_MAX_RETRIES;
+
+      if (canRetry) {
+        await sleep(getRetryDelayMs(attempt, response.headers.get("retry-after")));
+        continue;
+      }
+
+      throw new AmoCrmResponseError(`amoCRM request failed (${response.status}): ${body}`);
+    } catch (error) {
+      if (error instanceof AmoCrmResponseError) {
+        throw error;
+      }
+
+      const canRetry = isRetryableAmoFetchError(error) && attempt <= env.AMOCRM_MAX_RETRIES;
+
+      if (canRetry) {
+        await sleep(getRetryDelayMs(attempt, null));
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error("amoCRM request retries exhausted");
 }
 
 function extractObjectType(lead: AmoLeadResponse): string | null {
@@ -129,4 +221,9 @@ export async function patchLeadCustomFields(leadId: number, mutations: AmoFieldM
       }
     ])
   });
+}
+
+export function resetAmoClientStateForTests() {
+  amoRequestQueue = Promise.resolve();
+  nextAllowedAmoRequestAt = 0;
 }

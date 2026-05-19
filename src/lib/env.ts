@@ -3,6 +3,10 @@ import { z } from "zod";
 const serverEnvSchema = z.object({
   AMOCRM_BASE_URL: z.string().url().default("https://dveriopt24.amocrm.ru"),
   AMOCRM_LONG_LIVED_TOKEN: z.string().min(1),
+  AMOCRM_MIN_REQUEST_INTERVAL_MS: z.coerce.number().int().nonnegative().default(220),
+  AMOCRM_MAX_RETRIES: z.coerce.number().int().nonnegative().default(4),
+  AMOCRM_RETRY_BASE_DELAY_MS: z.coerce.number().int().positive().default(500),
+  AMOCRM_RETRY_MAX_DELAY_MS: z.coerce.number().int().positive().default(5000),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().email(),
