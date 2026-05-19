@@ -10,6 +10,12 @@ const serverEnvSchema = z.object({
   GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1),
   GOOGLE_SHEETS_KP_TAB: z.string().default("KP new"),
   GOOGLE_SHEETS_ZP_TAB: z.string().default("ЗП new"),
+  WEBHOOK_EVENTS_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  SHEET_JOBS_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  WEBHOOK_EVENTS_CLEANUP_BATCH_SIZE: z.coerce.number().int().positive().default(1000),
+  WEBHOOK_EVENTS_FAILED_CLEANUP_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+  SHEET_JOBS_CLEANUP_BATCH_SIZE: z.coerce.number().int().positive().default(500),
+  SHEET_JOBS_FAILED_CLEANUP_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   WEBHOOK_SHARED_SECRET: z.string().optional(),
   CRON_SECRET: z.string().optional()
 });

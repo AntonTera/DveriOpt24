@@ -1,4 +1,11 @@
-import { JsonValue, SheetJobPayload, SheetJobRecord, StoredDealState, WebhookEventRecord } from "@/lib/types";
+import {
+  JsonValue,
+  QueueCleanupResult,
+  SheetJobPayload,
+  SheetJobRecord,
+  StoredDealState,
+  WebhookEventRecord
+} from "@/lib/types";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 function parseDealState(row: Record<string, unknown>): StoredDealState {
@@ -93,6 +100,32 @@ export async function markWebhookEventFailed(id: string, attempts: number, error
   if (error) {
     throw new Error(`Failed to mark webhook event failed: ${error.message}`);
   }
+}
+
+export async function cleanupWebhookEventHistory(
+  processedBefore: string,
+  failedBefore: string,
+  processedLimit: number,
+  failedLimit: number
+): Promise<QueueCleanupResult> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.rpc("dveri_opt_cleanup_webhook_events", {
+    processed_before: processedBefore,
+    failed_before: failedBefore,
+    processed_limit: processedLimit,
+    failed_limit: failedLimit
+  });
+
+  if (error) {
+    throw new Error(`Failed to cleanup webhook event history: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+
+  return {
+    deleted_processed: Number(row?.deleted_processed ?? 0),
+    deleted_failed: Number(row?.deleted_failed ?? 0)
+  };
 }
 
 export async function getDealState(dealId: number): Promise<StoredDealState | null> {
@@ -242,6 +275,32 @@ export async function markSheetJobFailed(id: string, attempts: number, errorMess
   if (error) {
     throw new Error(`Failed to mark sheet job failed: ${error.message}`);
   }
+}
+
+export async function cleanupSheetJobHistory(
+  processedBefore: string,
+  failedBefore: string,
+  processedLimit: number,
+  failedLimit: number
+): Promise<QueueCleanupResult> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.rpc("dveri_opt_cleanup_sheet_jobs", {
+    processed_before: processedBefore,
+    failed_before: failedBefore,
+    processed_limit: processedLimit,
+    failed_limit: failedLimit
+  });
+
+  if (error) {
+    throw new Error(`Failed to cleanup sheet job history: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+
+  return {
+    deleted_processed: Number(row?.deleted_processed ?? 0),
+    deleted_failed: Number(row?.deleted_failed ?? 0)
+  };
 }
 
 export async function updateDealStateSheetPointer(

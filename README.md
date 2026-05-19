@@ -46,6 +46,11 @@ npm run dev
 Для server-side вызовов нужен именно `service_role` ключ Supabase.
 `anon`/public key для очереди не подойдёт: RPC `dveri_opt_claim_*` и запись в служебные таблицы будут падать.
 
+Примените также миграции очереди:
+
+- [supabase/migrations/0002_add_last_budget_to_deal_state.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0002_add_last_budget_to_deal_state.sql)
+- [supabase/migrations/0003_add_queue_history_cleanup.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0003_add_queue_history_cleanup.sql)
+
 ## Запуск очереди через n8n
 
 На бесплатном плане Vercel cron нельзя запускать чаще одного раза в день, поэтому этот проект рассчитан на внешний триггер из `n8n`.
@@ -67,6 +72,24 @@ Authorization: Bearer <CRON_SECRET>
 ```
 
 Рекомендуемый интервал в `n8n`: раз в 1-5 минут.
+
+## Retention очереди
+
+`/api/cron/process-queue` теперь не только обрабатывает очередь, но и подчищает старую историю небольшими батчами.
+
+По умолчанию:
+
+- `WEBHOOK_EVENTS_RETENTION_DAYS=7`
+- `SHEET_JOBS_RETENTION_DAYS=7`
+
+Дополнительно можно настроить размер батчей очистки:
+
+- `WEBHOOK_EVENTS_CLEANUP_BATCH_SIZE`
+- `WEBHOOK_EVENTS_FAILED_CLEANUP_BATCH_SIZE`
+- `SHEET_JOBS_CLEANUP_BATCH_SIZE`
+- `SHEET_JOBS_FAILED_CLEANUP_BATCH_SIZE`
+
+Это уменьшает рост таблиц, но физический размер в Postgres может снижаться не мгновенно: после больших удалений базе ещё нужно время на reclaim space.
 
 ## Vercel
 

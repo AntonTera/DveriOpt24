@@ -109,3 +109,8 @@ export interface WebhookEventRecord extends LeadChangeEvent {
   process_attempts: number;
   last_error: string | null;
 }
+
+export interface QueueCleanupResult {
+  deleted_processed: number;
+  deleted_failed: number;
+}
