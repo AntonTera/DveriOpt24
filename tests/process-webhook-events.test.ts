@@ -131,4 +131,38 @@ describe("processWebhookEvent", () => {
     );
     expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("evt-2");
   });
+
+  it("skips stale status events that arrive after a newer applied event", async () => {
+    getDealStateMock.mockResolvedValue({
+      deal_id: 7,
+      object_type: "Откосы",
+      is_frozen: true,
+      active_kpis: {},
+      kp_rows: {},
+      zp_rows: {},
+      last_budget: 1100,
+      last_status_id: AMO_STATUS.COMMISSION_RECEIVED,
+      last_event_received_at: "2026-05-25T11:15:06.504Z",
+      last_synced_at: "2026-05-25T11:16:04.825Z"
+    });
+
+    await processWebhookEvent({
+      id: "evt-3",
+      lead_id: 7,
+      pipeline_id: 4908391,
+      status_id: AMO_STATUS.REFUSED,
+      event_type: "status",
+      received_at: "2026-05-25T11:14:34.820Z",
+      payload_hash: "hash-3",
+      raw_payload: {},
+      processing_status: "processing",
+      process_attempts: 1,
+      last_error: null
+    });
+
+    expect(fetchLeadMock).not.toHaveBeenCalled();
+    expect(patchLeadCustomFieldsMock).not.toHaveBeenCalled();
+    expect(upsertDealStateMock).not.toHaveBeenCalled();
+    expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("evt-3");
+  });
 });

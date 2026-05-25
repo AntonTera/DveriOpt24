@@ -23,6 +23,7 @@ function parseDealState(row: Record<string, unknown>): StoredDealState {
           ? Number(row.last_budget)
           : null,
     last_status_id: (row.last_status_id as number | null) ?? null,
+    last_event_received_at: (row.last_event_received_at as string | null) ?? null,
     last_synced_at: (row.last_synced_at as string | null) ?? null
   };
 }
@@ -154,6 +155,7 @@ export async function upsertDealState(state: StoredDealState) {
     zp_rows: state.zp_rows,
     last_budget: state.last_budget,
     last_status_id: state.last_status_id,
+    last_event_received_at: state.last_event_received_at,
     last_synced_at: state.last_synced_at ?? new Date().toISOString()
   });
 

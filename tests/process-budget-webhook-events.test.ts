@@ -93,6 +93,7 @@ describe("processBudgetWebhookEvent", () => {
       zp_rows: {},
       last_budget: 125000,
       last_status_id: 44423716,
+      last_event_received_at: null,
       last_synced_at: "2026-05-14T10:00:00.000Z"
     });
     fetchLeadMock.mockResolvedValue({
@@ -182,6 +183,7 @@ describe("processBudgetWebhookEvent", () => {
       },
       last_budget: 125000,
       last_status_id: 44423716,
+      last_event_received_at: null,
       last_synced_at: "2026-05-14T10:00:00.000Z"
     });
     fetchLeadMock.mockResolvedValue({
@@ -255,5 +257,40 @@ describe("processBudgetWebhookEvent", () => {
       })
     );
     expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("budget-3");
+  });
+
+  it("skips stale budget events that arrive after a newer applied event", async () => {
+    getDealStateMock.mockResolvedValue({
+      deal_id: 12,
+      object_type: "Откосы",
+      is_frozen: true,
+      active_kpis: {},
+      kp_rows: {},
+      zp_rows: {},
+      last_budget: 1100,
+      last_status_id: 142,
+      last_event_received_at: "2026-05-25T11:15:12.400Z",
+      last_synced_at: "2026-05-25T11:16:05.542Z"
+    });
+
+    await processBudgetWebhookEvent({
+      id: "budget-4",
+      lead_id: 12,
+      pipeline_id: 4908391,
+      status_id: 143,
+      event_type: "budget_sync",
+      received_at: "2026-05-25T11:15:05.636Z",
+      payload_hash: "hash-budget-4",
+      raw_payload: {},
+      processing_status: "processing",
+      process_attempts: 1,
+      last_error: null
+    });
+
+    expect(fetchLeadMock).not.toHaveBeenCalled();
+    expect(patchLeadCustomFieldsMock).not.toHaveBeenCalled();
+    expect(enqueueSheetJobsMock).not.toHaveBeenCalled();
+    expect(upsertDealStateMock).not.toHaveBeenCalled();
+    expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("budget-4");
   });
 });

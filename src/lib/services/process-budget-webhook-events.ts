@@ -19,6 +19,7 @@ import {
   StoredDealState,
   WebhookEventRecord
 } from "@/lib/types";
+import { isStaleWebhookEvent } from "@/lib/utils/webhook-events";
 
 function calculateKpiAmount(budget: number): number {
   const normalizedBudget = Number.isFinite(budget) ? Math.max(0, budget) : 0;
@@ -128,6 +129,17 @@ export async function processBudgetWebhookEvent(event: WebhookEventRecord) {
     return;
   }
 
+  if (isStaleWebhookEvent(previousState, event.received_at)) {
+    logInfo("Skipping stale budget webhook event", {
+      dealId: event.lead_id,
+      statusId: event.status_id,
+      receivedAt: event.received_at,
+      lastEventReceivedAt: previousState.last_event_received_at
+    });
+    await markWebhookEventProcessed(event.id);
+    return;
+  }
+
   const lead = await fetchLead(event.lead_id);
 
   if (lead.pipelineId !== MAIN_PIPELINE_ID) {
@@ -187,6 +199,7 @@ export async function processBudgetWebhookEvent(event: WebhookEventRecord) {
     zp_rows: updateRowPointersAmounts(previousState.zp_rows, recalculatedState.activeKpis, calculateKpiAmount(nextBudget)),
     last_budget: nextBudget,
     last_status_id: lead.statusId,
+    last_event_received_at: event.received_at,
     last_synced_at: new Date().toISOString()
   });
 

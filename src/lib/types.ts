@@ -66,6 +66,7 @@ export interface StoredDealState {
   zp_rows: Partial<Record<KpiStage, SheetRowPointer>>;
   last_budget: number | null;
   last_status_id: number | null;
+  last_event_received_at: string | null;
   last_synced_at: string | null;
 }
 

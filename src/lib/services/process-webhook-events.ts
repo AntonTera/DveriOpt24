@@ -17,6 +17,7 @@ import {
 } from "@/lib/repositories";
 import { logInfo } from "@/lib/log";
 import { WebhookEventRecord } from "@/lib/types";
+import { isStaleWebhookEvent } from "@/lib/utils/webhook-events";
 
 export async function processWebhookEvent(event: WebhookEventRecord) {
   if (event.event_type === "budget_sync") {
@@ -28,6 +29,18 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
     logInfo("Skipping webhook with unsupported status", {
       dealId: event.lead_id,
       statusId: event.status_id
+    });
+    await markWebhookEventProcessed(event.id);
+    return;
+  }
+
+  const previousState = await getDealState(event.lead_id);
+  if (isStaleWebhookEvent(previousState, event.received_at)) {
+    logInfo("Skipping stale webhook event", {
+      dealId: event.lead_id,
+      statusId: event.status_id,
+      receivedAt: event.received_at,
+      lastEventReceivedAt: previousState?.last_event_received_at
     });
     await markWebhookEventProcessed(event.id);
     return;
@@ -78,7 +91,6 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
     });
   }
 
-  const previousState = await getDealState(event.lead_id);
   const managerName = await fetchUserName(lead.responsibleUserId);
 
   if (!ALLOWED_RESPONSIBLE_USER_NAMES.has(managerName)) {
@@ -115,6 +127,7 @@ export async function processWebhookEvent(event: WebhookEventRecord) {
     zp_rows: previousState?.zp_rows ?? {},
     last_budget: lead.budget,
     last_status_id: lead.statusId,
+    last_event_received_at: event.received_at,
     last_synced_at: new Date().toISOString()
   });
 

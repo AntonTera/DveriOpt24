@@ -66,6 +66,7 @@ describe("deriveLeadKpiState", () => {
       zp_rows: {},
       last_budget: 125000,
       last_status_id: 44423710,
+      last_event_received_at: null,
       last_synced_at: null
     };
 
@@ -122,6 +123,7 @@ describe("deriveLeadKpiState", () => {
       zp_rows: {},
       last_budget: 125000,
       last_status_id: 142,
+      last_event_received_at: null,
       last_synced_at: null
     };
 
@@ -189,6 +191,7 @@ describe("deriveLeadKpiState", () => {
       },
       last_budget: 125000,
       last_status_id: 142,
+      last_event_received_at: null,
       last_synced_at: null
     };
 
@@ -270,7 +273,9 @@ describe("deriveLeadKpiState", () => {
         }
       },
       zp_rows: {},
+      last_budget: 125000,
       last_status_id: 44616253,
+      last_event_received_at: null,
       last_synced_at: null
     };
 
