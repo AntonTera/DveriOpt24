@@ -4,7 +4,11 @@ import {
   AMO_KPI_SUPPORTED_STATUS_IDS,
   AMO_STATUS,
   EXCLUDED_RESPONSIBLE_USER_ID,
+  KPI_STAGE_META,
+  KPI_STAGE_ORDER,
   KPI_FIELD_IDS,
+  OBJECT_TYPE_RULES,
+  getStatusSort,
   type AmoKpiStage
 } from "@/lib/constants/amocrm";
 import { AmoFieldMutation, AmoLeadSnapshot } from "@/lib/types";
@@ -62,23 +66,19 @@ function buildStageMutations(
   ];
 }
 
-function buildRecalculationMutations(lead: AmoLeadSnapshot): AmoFieldMutation[] {
+function buildRecalculationMutations(lead: AmoLeadSnapshot, statusId: number): AmoFieldMutation[] {
   const amount = calculateKpiAmount(lead.budget);
+  const rule = lead.objectType ? OBJECT_TYPE_RULES[lead.objectType] : undefined;
+  const statusSort = getStatusSort(statusId);
 
-  return [
-    {
-      fieldId: KPI_FIELD_IDS.work.money,
-      value: amount
-    },
-    {
-      fieldId: KPI_FIELD_IDS.measure.money,
-      value: amount
-    },
-    {
-      fieldId: KPI_FIELD_IDS.install.money,
-      value: amount
-    }
-  ];
+  return KPI_STAGE_ORDER.map((stage) => {
+    const isStageActive = Boolean(rule?.[stage]) && statusSort >= KPI_STAGE_META[stage].reachedSort;
+
+    return {
+      fieldId: KPI_FIELD_IDS[stage].money,
+      value: isStageActive ? amount : 0
+    };
+  });
 }
 
 function buildRefusalMutations(): AmoFieldMutation[] {
@@ -112,7 +112,14 @@ export function buildAmoKpiPatch(params: {
   if (statusId === AMO_STATUS.SALARY_RECONCILED) {
     return {
       scenario: "salary_reconciled_recalculation",
-      mutations: buildRecalculationMutations(lead)
+      mutations: buildRecalculationMutations(lead, statusId)
+    };
+  }
+
+  if (statusId === AMO_STATUS.COMMISSION_RECEIVED) {
+    return {
+      scenario: "commission_received_recalculation",
+      mutations: buildRecalculationMutations(lead, statusId)
     };
   }
 

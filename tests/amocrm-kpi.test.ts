@@ -77,9 +77,31 @@ describe("buildAmoKpiPatch", () => {
     expect(result).toEqual({
       scenario: "salary_reconciled_recalculation",
       mutations: [
-        { fieldId: 1164529, value: 10000 },
+        { fieldId: 1164529, value: 0 },
         { fieldId: 1164535, value: 10000 },
         { fieldId: 1164541, value: 10000 }
+      ]
+    });
+  });
+
+  it("recalculates only relevant money fields on commission received", () => {
+    const result = buildAmoKpiPatch({
+      lead: buildLead({
+        name: "Откосы",
+        budget: 1100,
+        objectType: "Откосы",
+        statusId: AMO_STATUS.COMMISSION_RECEIVED
+      }),
+      statusId: AMO_STATUS.COMMISSION_RECEIVED,
+      managerName: null
+    });
+
+    expect(result).toEqual({
+      scenario: "commission_received_recalculation",
+      mutations: [
+        { fieldId: 1164529, value: 88 },
+        { fieldId: 1164535, value: 0 },
+        { fieldId: 1164541, value: 0 }
       ]
     });
   });
