@@ -1,168 +1,149 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("@/lib/amocrm/client", () => ({
-  fetchLead: vi.fn(),
-  fetchUserName: vi.fn(),
-  patchLeadCustomFields: vi.fn()
-}));
-
-vi.mock("@/lib/repositories", () => ({
-  enqueueSheetJobs: vi.fn(),
-  getDealState: vi.fn(),
-  markWebhookEventFailed: vi.fn(),
-  markWebhookEventProcessed: vi.fn(),
-  upsertDealState: vi.fn()
-}));
-
-vi.mock("@/lib/domain/kpi", () => ({
-  buildSheetSyncJobs: vi.fn(),
-  deriveLeadKpiState: vi.fn()
-}));
-
-vi.mock("@/lib/log", () => ({
-  logInfo: vi.fn(),
-  logError: vi.fn(),
-  logWarn: vi.fn()
-}));
-
+vi.mock("@/lib/amocrm/client", () => ({ fetchLead: vi.fn(), fetchLeadKpiHistory: vi.fn(), fetchUserName: vi.fn(), patchLeadCustomFields: vi.fn() }));
+vi.mock("@/lib/repositories", () => ({ enqueueSheetJobs: vi.fn(), getDealState: vi.fn(), markWebhookEventFailed: vi.fn(), markWebhookEventProcessed: vi.fn(), upsertDealState: vi.fn() }));
+vi.mock("@/lib/log", () => ({ logInfo: vi.fn() }));
 import { AMO_STATUS } from "@/lib/constants/amocrm";
-import { fetchLead, fetchUserName, patchLeadCustomFields } from "@/lib/amocrm/client";
-import { buildSheetSyncJobs, deriveLeadKpiState } from "@/lib/domain/kpi";
-import { logInfo } from "@/lib/log";
-import {
-  enqueueSheetJobs,
-  getDealState,
-  markWebhookEventProcessed,
-  upsertDealState
-} from "@/lib/repositories";
-import { processWebhookEvent } from "@/lib/services/process-webhook-events";
+import { fetchLead, fetchLeadKpiHistory, fetchUserName, patchLeadCustomFields } from "@/lib/amocrm/client";
+import { enqueueSheetJobs, getDealState, markWebhookEventFailed, markWebhookEventProcessed, upsertDealState } from "@/lib/repositories";
+import { processWebhookEvent, safelyProcessWebhookEvent } from "@/lib/services/process-webhook-events";
+import { processBudgetWebhookEvent } from "@/lib/services/process-budget-webhook-events";
+import { AmoLeadSnapshot, StoredDealState, WebhookEventRecord } from "@/lib/types";
 
-const fetchLeadMock = vi.mocked(fetchLead);
-const fetchUserNameMock = vi.mocked(fetchUserName);
-const patchLeadCustomFieldsMock = vi.mocked(patchLeadCustomFields);
-const buildSheetSyncJobsMock = vi.mocked(buildSheetSyncJobs);
-const deriveLeadKpiStateMock = vi.mocked(deriveLeadKpiState);
-const logInfoMock = vi.mocked(logInfo);
-const enqueueSheetJobsMock = vi.mocked(enqueueSheetJobs);
-const getDealStateMock = vi.mocked(getDealState);
-const markWebhookEventProcessedMock = vi.mocked(markWebhookEventProcessed);
-const upsertDealStateMock = vi.mocked(upsertDealState);
+const lead: AmoLeadSnapshot = {
+  id: 30574649, name: "KPI regression", budget: 12500, updatedAt: "2026-10-30T07:42:12Z",
+  pipelineId: 4908391, statusId: AMO_STATUS.AWAITING_COMMISSION, responsibleUserId: 7268314,
+  objectType: "Входная", link: "https://dveriopt24.amocrm.ru/leads/detail/30574649",
+  kpiFields: { work: {date:"28.10.2026",manager:"Филипп",amount:0}, measure: {date:"28.10.2026",manager:"Филипп",amount:1000} }
+};
+const measure = { stage: "measure", label: "Замер", amount: 1000, date: "28.10.2026", time: "13:58", manager: "Филипп" } as const;
+const state: StoredDealState = {
+  deal_id: lead.id, object_type: "Входная", is_frozen: false, active_kpis: {measure},
+  kp_rows: {measure: {rowIndex: 1585, payload: {stage:"measure",date:measure.date,time:measure.time,kpiLabel:measure.label,
+    leadName:lead.name,amount:1000,link:lead.link,dealId:lead.id,installDate:null}}}, zp_rows: {},
+  last_budget: 12500, last_status_id: AMO_STATUS.MEASURE, last_event_received_at: null, last_synced_at: null
+};
+const event: WebhookEventRecord = {
+  id:"evt-1",lead_id:lead.id,pipeline_id:4908391,status_id:AMO_STATUS.MEASURE,event_type:"status",
+  received_at:"2026-10-30T10:00:00Z",payload_hash:"test",raw_payload:{},processing_status:"processing",process_attempts:1,last_error:null
+};
 
-describe("processWebhookEvent", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    getDealStateMock.mockResolvedValue(null);
-    fetchUserNameMock.mockResolvedValue("Людмила");
-    deriveLeadKpiStateMock.mockReturnValue({
-      dealId: 7,
-      objectType: "Входная",
-      isFrozen: false,
-      activeKpis: {},
-      amoFieldsPatch: [],
-      sheetRowsKpNew: [],
-      sheetRowsZpNew: []
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(getDealState).mockResolvedValue(structuredClone(state));
+  vi.mocked(fetchLead).mockResolvedValue(structuredClone(lead));
+  vi.mocked(fetchLeadKpiHistory).mockResolvedValue({install:{occurredAt:"2026-10-30T07:41:48Z",manager:"Филипп"}});
+  vi.mocked(fetchUserName).mockResolvedValue("Филипп");
+});
+
+for (const [name, handler] of [["status",processWebhookEvent],["budget",processBudgetWebhookEvent]] as const) {
+  describe(`${name} KPI reconciliation`, () => {
+    it("restores skipped installation even with unchanged budget, using the live stage", async () => {
+      await handler({...event,event_type:name === "budget" ? "budget_sync" : "status"});
+      expect(patchLeadCustomFields).toHaveBeenCalledWith(lead.id, [
+        {fieldId:1164537,value:"30.10.2026"},{fieldId:1164539,value:"Филипп"},{fieldId:1164541,value:1000}
+      ]);
+      expect(enqueueSheetJobs).toHaveBeenCalledWith([expect.objectContaining({row_key:`${lead.id}:KP new:install`,payload:expect.objectContaining({row:expect.objectContaining({date:"30.10.2026",time:"10:41",amount:1000})})})]);
+      expect(vi.mocked(upsertDealState).mock.calls[0][0].active_kpis).toEqual({measure,install:expect.objectContaining({amount:1000,manager:"Филипп"})});
     });
-    buildSheetSyncJobsMock.mockReturnValue([]);
-    enqueueSheetJobsMock.mockResolvedValue(undefined);
-    upsertDealStateMock.mockResolvedValue(undefined);
-    markWebhookEventProcessedMock.mockResolvedValue(undefined);
-    patchLeadCustomFieldsMock.mockResolvedValue(undefined);
+
+    it("initializes missing state when the budget arrives after skipped stages", async () => {
+      vi.mocked(getDealState).mockResolvedValue(null);
+      await handler(event);
+      expect(vi.mocked(upsertDealState).mock.calls[0][0].active_kpis.install?.amount).toBe(1000);
+      expect(vi.mocked(upsertDealState).mock.calls[0][0].active_kpis.work).toBeUndefined();
+    });
+
+    it("does not duplicate rows or reset capture metadata on repeat processing", async () => {
+      await handler(event);
+      const next = vi.mocked(upsertDealState).mock.calls[0][0];
+      const jobs = vi.mocked(enqueueSheetJobs).mock.calls[0][0];
+      for (const job of jobs) next.kp_rows[job.payload.stage] = {rowIndex:1600,payload:job.payload.row};
+      vi.mocked(getDealState).mockResolvedValue(next);
+      vi.mocked(fetchLead).mockResolvedValue({...lead,kpiFields:{...lead.kpiFields,install:{date:"30.10.2026",manager:"Филипп",amount:1000}}});
+      vi.mocked(enqueueSheetJobs).mockClear();
+      vi.mocked(patchLeadCustomFields).mockClear();
+      await handler({...event,received_at:"2026-10-30T10:05:00Z"});
+      expect(enqueueSheetJobs).toHaveBeenCalledWith([]);
+      expect(patchLeadCustomFields).toHaveBeenCalledWith(lead.id,[]);
+    });
+
+    it("skips stale events before touching CRM or Sheets", async () => {
+      vi.mocked(getDealState).mockResolvedValue({...state,last_event_received_at:"2026-10-30T11:00:00Z"});
+      await handler(event);
+      expect(fetchLead).not.toHaveBeenCalled();
+      expect(upsertDealState).not.toHaveBeenCalled();
+      expect(markWebhookEventProcessed).toHaveBeenCalledWith(event.id);
+    });
   });
+}
 
-  it("skips unsupported statuses before loading lead details", async () => {
-    await processWebhookEvent({
-      id: "evt-1",
-      lead_id: 7,
-      pipeline_id: 4908391,
-      status_id: 111111,
-      event_type: "status",
-      received_at: "2026-05-13T10:00:00.000Z",
-      payload_hash: "hash-1",
-      raw_payload: {},
-      processing_status: "processing",
-      process_attempts: 1,
-      last_error: null
-    });
+it("zeroes money on refusal while preserving captured dates and managers", async () => {
+  vi.mocked(fetchLead).mockResolvedValue({...lead,statusId:AMO_STATUS.REFUSED});
+  await processWebhookEvent(event);
+  expect(patchLeadCustomFields).toHaveBeenCalledWith(lead.id,[{fieldId:1164535,value:0},{fieldId:1164541,value:0}]);
+  expect(vi.mocked(upsertDealState).mock.calls[0][0].active_kpis).toEqual({});
+  expect(vi.mocked(enqueueSheetJobs).mock.calls[0][0][0]).toMatchObject({job_type:"zero",payload:{row:{amount:0}}});
+});
 
-    expect(fetchLeadMock).not.toHaveBeenCalled();
-    expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("evt-1");
-  });
+it("does not overwrite frozen amounts or object type on budget changes after commission", async () => {
+  vi.mocked(getDealState).mockResolvedValue({...state,is_frozen:true,last_status_id:AMO_STATUS.COMMISSION_RECEIVED});
+  vi.mocked(fetchLead).mockResolvedValue({...lead,statusId:AMO_STATUS.COMMISSION_RECEIVED,budget:99999,objectType:"Откосы"});
+  await processBudgetWebhookEvent(event);
+  expect(vi.mocked(upsertDealState).mock.calls[0][0]).toMatchObject({object_type:"Входная",active_kpis:{measure:{amount:1000}}});
+  expect(fetchLeadKpiHistory).not.toHaveBeenCalled();
+  expect(vi.mocked(patchLeadCustomFields).mock.calls[0][1].some(m => m.value === 8000)).toBe(false);
+});
 
-  it("writes only zeroed money fields to amoCRM on refused status", async () => {
-    fetchLeadMock.mockResolvedValue({
-      id: 7,
-      name: "Сделка",
-      budget: 200000,
-      updatedAt: "2026-05-13T09:00:00.000Z",
-      pipelineId: 4908391,
-      statusId: AMO_STATUS.REFUSED,
-      responsibleUserId: 12043998,
-      objectType: "Входная",
-      link: "https://dveriopt24.amocrm.ru/leads/detail/7"
-    });
+it("skips unsupported live statuses and excluded responsible users", async () => {
+  for (const changed of [{statusId:999999},{responsibleUserId:8445565},{pipelineId:1}]) {
+    vi.mocked(fetchLead).mockResolvedValue({...lead,...changed});
+    await processWebhookEvent(event);
+  }
+  expect(patchLeadCustomFields).not.toHaveBeenCalled();
+  expect(upsertDealState).not.toHaveBeenCalled();
+});
 
-    await processWebhookEvent({
-      id: "evt-2",
-      lead_id: 7,
-      pipeline_id: 4908391,
-      status_id: AMO_STATUS.REFUSED,
-      event_type: "status",
-      received_at: "2026-05-13T10:00:00.000Z",
-      payload_hash: "hash-2",
-      raw_payload: {},
-      processing_status: "processing",
-      process_attempts: 1,
-      last_error: null
-    });
+it("records a retry if CRM history fails instead of inventing capture dates", async () => {
+  vi.mocked(fetchLeadKpiHistory).mockRejectedValue(new Error("history unavailable"));
+  await safelyProcessWebhookEvent(event);
+  expect(patchLeadCustomFields).not.toHaveBeenCalled();
+  expect(markWebhookEventFailed).toHaveBeenCalledWith(event.id,1,"history unavailable");
+});
 
-    expect(patchLeadCustomFieldsMock).toHaveBeenCalledWith(7, [
-      { fieldId: 1164529, value: 0 },
-      { fieldId: 1164535, value: 0 },
-      { fieldId: 1164541, value: 0 }
-    ]);
-    expect(logInfoMock).toHaveBeenCalledWith(
-      "Updated amoCRM KPI fields",
-      expect.objectContaining({
-        dealId: 7,
-        statusId: AMO_STATUS.REFUSED,
-        scenario: "refused_zero_amounts",
-        updatedFieldIds: [1164529, 1164535, 1164541]
-      })
-    );
-    expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("evt-2");
-  });
+it("recalculates late budget for both stages, retaining historical dates and confirmed sheet pointers", async () => {
+  const previous = structuredClone(state);
+  previous.last_budget = 0;
+  previous.active_kpis.measure!.amount = 0;
+  previous.kp_rows.measure!.payload.amount = 0;
+  vi.mocked(getDealState).mockResolvedValue(previous);
+  vi.mocked(fetchLead).mockResolvedValue({...lead,kpiFields:{...lead.kpiFields,measure:{date:"28.10.2026",manager:"Филипп",amount:0}}});
+  await processBudgetWebhookEvent(event);
+  expect(patchLeadCustomFields).toHaveBeenCalledWith(lead.id,expect.arrayContaining([
+    {fieldId:1164535,value:1000},{fieldId:1164541,value:1000}
+  ]));
+  const saved = vi.mocked(upsertDealState).mock.calls[0][0];
+  expect(saved.active_kpis.measure).toEqual(measure);
+  expect(saved.kp_rows.measure!.payload.amount).toBe(0);
+  expect(vi.mocked(enqueueSheetJobs).mock.calls[0][0]).toHaveLength(2);
+});
 
-  it("skips stale status events that arrive after a newer applied event", async () => {
-    getDealStateMock.mockResolvedValue({
-      deal_id: 7,
-      object_type: "Откосы",
-      is_frozen: true,
-      active_kpis: {},
-      kp_rows: {},
-      zp_rows: {},
-      last_budget: 1100,
-      last_status_id: AMO_STATUS.COMMISSION_RECEIVED,
-      last_event_received_at: "2026-05-25T11:15:06.504Z",
-      last_synced_at: "2026-05-25T11:16:04.825Z"
-    });
+it("freezes the first commission calculation and queues salary rows for both eligible stages", async () => {
+  vi.mocked(fetchLead).mockResolvedValue({...lead,statusId:AMO_STATUS.COMMISSION_RECEIVED});
+  await processWebhookEvent(event);
+  const next = vi.mocked(upsertDealState).mock.calls[0][0];
+  expect(next.is_frozen).toBe(true);
+  expect(next.active_kpis.measure?.amount).toBe(1000);
+  expect(next.active_kpis.install?.amount).toBe(1000);
+  const salaryJobs = vi.mocked(enqueueSheetJobs).mock.calls[0][0].filter(j => j.sheet_name === "ЗП new");
+  expect(salaryJobs).toHaveLength(2);
+  expect(salaryJobs.every(j => j.payload.row.amount === 1000)).toBe(true);
+});
 
-    await processWebhookEvent({
-      id: "evt-3",
-      lead_id: 7,
-      pipeline_id: 4908391,
-      status_id: AMO_STATUS.REFUSED,
-      event_type: "status",
-      received_at: "2026-05-25T11:14:34.820Z",
-      payload_hash: "hash-3",
-      raw_payload: {},
-      processing_status: "processing",
-      process_attempts: 1,
-      last_error: null
-    });
-
-    expect(fetchLeadMock).not.toHaveBeenCalled();
-    expect(patchLeadCustomFieldsMock).not.toHaveBeenCalled();
-    expect(upsertDealStateMock).not.toHaveBeenCalled();
-    expect(markWebhookEventProcessedMock).toHaveBeenCalledWith("evt-3");
-  });
+it("keeps entrance work at zero even when a nonzero budget is entered on the work stage", async () => {
+  vi.mocked(getDealState).mockResolvedValue(null);
+  vi.mocked(fetchLead).mockResolvedValue({...lead,statusId:AMO_STATUS.WORK,kpiFields:{work:{date:"28.10.2026",manager:"Филипп",amount:1000}}});
+  await processWebhookEvent(event);
+  expect(patchLeadCustomFields).toHaveBeenCalledWith(lead.id,expect.arrayContaining([{fieldId:1164529,value:0}]));
+  expect(vi.mocked(upsertDealState).mock.calls[0][0].active_kpis).toEqual({});
+  expect(enqueueSheetJobs).toHaveBeenCalledWith([]);
 });

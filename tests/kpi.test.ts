@@ -300,3 +300,47 @@ describe("deriveLeadKpiState", () => {
     expect(jobs).toEqual([]);
   });
 });
+
+describe("CRM capture preservation", () => {
+  it("preserves existing CRM date and manager when rebuilding missing internal state", () => {
+    const state = deriveLeadKpiState({
+      lead: buildLead({objectType:"Входная",statusId:44616259,budget:11700,
+        kpiFields:{install:{date:"21.10.2026",manager:"Людмила",amount:936}},
+        stageHistory:{install:{occurredAt:"2026-10-20T08:00:00Z",manager:"Филипп"}}}),
+      previousState:null,processedAt:"2026-10-30T10:00:00Z",managerName:"Филипп"
+    });
+    expect(state.activeKpis.install).toMatchObject({date:"21.10.2026",manager:"Людмила",amount:936});
+    expect(state.amoFieldsPatch.filter(m => [1164537,1164539,1164541].includes(m.fieldId))).toEqual([]);
+  });
+
+  it("keeps measure active on intermediate stages with no new salary rows", () => {
+    for (const statusId of [62159506,44616250]) {
+      const state = deriveLeadKpiState({lead:buildLead({objectType:"Входная",statusId}),previousState:null,
+        processedAt:"2026-10-30T10:00:00Z",managerName:"Филипп"});
+      expect(Object.keys(state.activeKpis)).toEqual(["measure"]);
+      expect(state.sheetRowsZpNew).toEqual([]);
+    }
+  });
+});
+
+it("does not enqueue unchanged rows after JSONB reordered their properties", () => {
+  const lead = buildLead({objectType:"Входная",statusId:44616259});
+  const initial = deriveLeadKpiState({lead,previousState:null,processedAt:"2026-10-30T10:00:00Z",managerName:"Филипп"});
+  const previousState: StoredDealState = {deal_id:lead.id,object_type:lead.objectType,is_frozen:false,
+    active_kpis:initial.activeKpis,kp_rows:{},zp_rows:{},last_budget:lead.budget,last_status_id:lead.statusId,last_event_received_at:null,last_synced_at:null};
+  for (const row of initial.sheetRowsKpNew) {
+    previousState.kp_rows[row.stage]={rowIndex:123,payload:Object.fromEntries(Object.entries(row).reverse()) as typeof row};
+  }
+  const next = deriveLeadKpiState({lead,previousState,processedAt:"2026-10-30T11:00:00Z",managerName:"Филипп"});
+  expect(buildSheetSyncJobs({lead,previousState,nextState:next})).toEqual([]);
+});
+
+it("still captures work date and manager for entrance doors while keeping money at zero", () => {
+  const state = deriveLeadKpiState({lead:buildLead({objectType:"Входная",statusId:44423710,kpiFields:{},
+    stageHistory:{work:{occurredAt:"2026-10-28T10:38:07Z",manager:"Филипп"}}}),previousState:null,
+    processedAt:"2026-10-30T10:00:00Z",managerName:"Людмила"});
+  expect(state.activeKpis).toEqual({});
+  expect(state.amoFieldsPatch).toEqual(expect.arrayContaining([
+    {fieldId:1164525,value:"28.10.2026"},{fieldId:1164527,value:"Филипп"},{fieldId:1164529,value:0}
+  ]));
+});

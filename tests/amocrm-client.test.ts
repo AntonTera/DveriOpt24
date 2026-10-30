@@ -89,3 +89,42 @@ describe("amocrm client retries", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+it("reads existing KPI fields without losing zero amounts or Moscow dates", async () => {
+  resetAmoClientStateForTests();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse({
+    id:42,name:"Deal",price:12500,pipeline_id:4908391,status_id:44616259,responsible_user_id:7268314,
+    custom_fields_values:[
+      {field_id:1020845,values:[{value:"Входная"}]},
+      {field_id:1164529,values:[{value:"0"}]},
+      {field_id:1164537,values:[{value:1793307600}]},
+      {field_id:1164539,values:[{value:"Филипп"}]},
+      {field_id:1164541,values:[{value:"1000"}]}
+    ]
+  })));
+  const lead = await fetchLead(42);
+  expect(lead.kpiFields?.work?.amount).toBe(0);
+  expect(lead.kpiFields?.install).toEqual({date:"30.10.2026",manager:"Филипп",amount:1000});
+  expect(lead.kpiFields?.measure).toEqual({date:null,manager:null,amount:null});
+});
+
+it("paginates filtered stage history and resolves a skipped installation", async () => {
+  const { fetchLeadKpiHistory } = await import("@/lib/amocrm/client");
+  resetAmoClientStateForTests();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(makeJsonResponse({_embedded:{events:[{
+      id:"b",type:"lead_status_changed",created_at:1793346108,
+      value_before:[{lead_status:{id:44423716,pipeline_id:4908391}}],
+      value_after:[{lead_status:{id:44616259,pipeline_id:4908391}}]
+    }]},_links:{next:{href:"ignored"}}}))
+    .mockResolvedValueOnce(makeJsonResponse({_embedded:{events:[]}}));
+  vi.stubGlobal("fetch",fetchMock);
+  const result = await fetchLeadKpiHistory({id:42,name:"Deal",budget:12500,updatedAt:"2026-10-30T09:00:00Z",
+    pipelineId:4908391,statusId:44616259,responsibleUserId:7268314,objectType:"Входная",link:""});
+  expect(result.install).toEqual({occurredAt:"2026-10-30T07:41:48.000Z",manager:"Филипп"});
+  const first = new URL(fetchMock.mock.calls[0][0]);
+  const second = new URL(fetchMock.mock.calls[1][0]);
+  expect(first.searchParams.getAll("filter[type][]")).toEqual(["lead_status_changed","entity_responsible_changed"]);
+  expect(first.searchParams.get("filter[entity_id][]")).toBe("42");
+  expect(second.searchParams.get("page")).toBe("2");
+});

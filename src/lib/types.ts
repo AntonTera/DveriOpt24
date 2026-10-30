@@ -29,6 +29,8 @@ export interface AmoLeadSnapshot {
   responsibleUserId: number | null;
   objectType: string | null;
   link: string;
+  kpiFields?: Partial<Record<KpiStage, { date: string | null; manager: string | null; amount: number | null }>>;
+  stageHistory?: Partial<Record<KpiStage, { occurredAt: string; manager: string }>>;
 }
 
 export interface ActiveKpiRecord {

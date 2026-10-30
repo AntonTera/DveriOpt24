@@ -1,162 +1,65 @@
 import { describe, expect, it } from "vitest";
-
-import { AMO_STATUS } from "@/lib/constants/amocrm";
-import { buildAmoKpiPatch } from "@/lib/domain/amocrm-kpi";
+import { AMO_STATUS, getStatusSort } from "@/lib/constants/amocrm";
+import { missingKpiHistoryStages, resolveLeadStageHistory, shouldHandleAmoKpiStatus, type AmoHistoryEvent } from "@/lib/domain/amocrm-kpi";
 import { AmoLeadSnapshot } from "@/lib/types";
 
-function buildLead(overrides: Partial<AmoLeadSnapshot> = {}): AmoLeadSnapshot {
-  return {
-    id: 99,
-    name: "Сделка KPI",
-    budget: 125000,
-    updatedAt: "2026-05-13T09:00:00.000Z",
-    pipelineId: 4908391,
-    statusId: AMO_STATUS.WORK,
-    responsibleUserId: 12043998,
-    objectType: "Входная",
-    link: "https://dveriopt24.amocrm.ru/leads/detail/99",
-    ...overrides
-  };
+const lead: AmoLeadSnapshot = {
+  id: 30574649, name: "KPI regression", budget: 12500, updatedAt: "2026-10-30T07:41:48Z",
+  pipelineId: 4908391, statusId: AMO_STATUS.AWAITING_COMMISSION,
+  responsibleUserId: 7268314, objectType: "Входная", link: "https://dveriopt24.amocrm.ru/leads/detail/30574649"
+};
+function transition(id: string, at: number, before: number, after: number, pipelineId = 4908391): AmoHistoryEvent {
+  return { id, type: "lead_status_changed", created_at: at,
+    value_before: [{ lead_status: { id: before, pipeline_id: pipelineId } }],
+    value_after: [{ lead_status: { id: after, pipeline_id: pipelineId } }] };
 }
 
-describe("buildAmoKpiPatch", () => {
-  it("creates work patch for work status", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: AMO_STATUS.WORK,
-      managerName: "Людмила"
-    });
-
-    expect(result).toEqual({
-      scenario: "work_kpi_capture",
-      mutations: [
-        { fieldId: 1164525, value: "13.05.2026" },
-        { fieldId: 1164527, value: "Людмила" },
-        { fieldId: 1164529, value: 10000 }
-      ]
-    });
+describe("KPI stage history", () => {
+  it("recognizes all live pipeline stages in order", () => {
+    const stages = [AMO_STATUS.NEW, AMO_STATUS.WORK, AMO_STATUS.NEED_IDENTIFIED, AMO_STATUS.MEASURE,
+      AMO_STATUS.AWAITING_ARRIVAL, AMO_STATUS.MEASURE_COMPLETED, AMO_STATUS.INSTALL,
+      AMO_STATUS.AWAITING_COMMISSION, AMO_STATUS.SALARY_RECONCILED, AMO_STATUS.COMMISSION_RECEIVED];
+    expect(stages.every(shouldHandleAmoKpiStatus)).toBe(true);
+    expect(stages.map(getStatusSort)).toEqual([10,20,30,40,50,60,70,80,90,10000]);
+    expect(shouldHandleAmoKpiStatus(999999)).toBe(false);
+    expect(shouldHandleAmoKpiStatus(null)).toBe(false);
   });
 
-  it("creates measure patch only for measure status", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: AMO_STATUS.MEASURE,
-      managerName: "Филипп"
-    });
-
-    expect(result?.scenario).toBe("measure_kpi_capture");
-    expect(result?.mutations).toEqual([
-      { fieldId: 1164531, value: "13.05.2026" },
-      { fieldId: 1164533, value: "Филипп" },
-      { fieldId: 1164535, value: 10000 }
+  it("recovers the installation date from a skipped-stage transition", () => {
+    const result = resolveLeadStageHistory(lead, [
+      transition("later", 1793346108, AMO_STATUS.MEASURE, AMO_STATUS.AWAITING_COMMISSION),
+      transition("earlier", 1793185130, AMO_STATUS.WORK, AMO_STATUS.MEASURE)
     ]);
+    expect(result?.install).toEqual({ occurredAt: "2026-10-30T07:41:48.000Z", manager: "Филипп" });
+    expect(result?.measure?.occurredAt).toBe("2026-10-28T10:58:50.000Z");
   });
 
-  it("creates install patch only for install status", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: AMO_STATUS.INSTALL,
-      managerName: "Филипп"
-    });
+  it("uses the responsible manager at capture time rather than the event author or current manager", () => {
+    const changed: AmoHistoryEvent = { id: "b", type: "entity_responsible_changed", created_at: 200,
+      value_before: [{responsible_user: {id: 12043998}}], value_after: [{responsible_user: {id: 7268314}}] };
+    const history = resolveLeadStageHistory(lead, [changed, transition("a", 100, AMO_STATUS.MEASURE, AMO_STATUS.INSTALL)]);
+    expect(history?.install?.manager).toBe("Людмила");
+  });
 
-    expect(result?.scenario).toBe("install_kpi_capture");
-    expect(result?.mutations).toEqual([
-      { fieldId: 1164537, value: "13.05.2026" },
-      { fieldId: 1164539, value: "Филипп" },
-      { fieldId: 1164541, value: 10000 }
+  it("does not use refusal or other pipelines as evidence that installation happened", () => {
+    expect(resolveLeadStageHistory(lead, [
+      transition("a", 100, AMO_STATUS.MEASURE, AMO_STATUS.REFUSED),
+      transition("b", 200, AMO_STATUS.MEASURE, AMO_STATUS.INSTALL, 123)
+    ])).toEqual({});
+  });
+
+  it("keeps the first capture date after a rollback and repeat transition", () => {
+    const history = resolveLeadStageHistory(lead, [
+      transition("a", 100, AMO_STATUS.MEASURE, AMO_STATUS.INSTALL),
+      transition("b", 200, AMO_STATUS.INSTALL, AMO_STATUS.MEASURE),
+      transition("c", 300, AMO_STATUS.MEASURE, AMO_STATUS.INSTALL)
     ]);
+    expect(history?.install?.occurredAt).toBe("1970-01-01T00:01:40.000Z");
   });
 
-  it("recalculates only money fields on salary reconciled", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: AMO_STATUS.SALARY_RECONCILED,
-      managerName: null
-    });
-
-    expect(result).toEqual({
-      scenario: "salary_reconciled_recalculation",
-      mutations: [
-        { fieldId: 1164529, value: 0 },
-        { fieldId: 1164535, value: 10000 },
-        { fieldId: 1164541, value: 10000 }
-      ]
-    });
-  });
-
-  it("recalculates only relevant money fields on commission received", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead({
-        name: "Откосы",
-        budget: 1100,
-        objectType: "Откосы",
-        statusId: AMO_STATUS.COMMISSION_RECEIVED
-      }),
-      statusId: AMO_STATUS.COMMISSION_RECEIVED,
-      managerName: null
-    });
-
-    expect(result).toEqual({
-      scenario: "commission_received_recalculation",
-      mutations: [
-        { fieldId: 1164529, value: 88 },
-        { fieldId: 1164535, value: 0 },
-        { fieldId: 1164541, value: 0 }
-      ]
-    });
-  });
-
-  it("zeroes only money fields on refused status", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: AMO_STATUS.REFUSED,
-      managerName: null
-    });
-
-    expect(result).toEqual({
-      scenario: "refused_zero_amounts",
-      mutations: [
-        { fieldId: 1164529, value: 0 },
-        { fieldId: 1164535, value: 0 },
-        { fieldId: 1164541, value: 0 }
-      ]
-    });
-  });
-
-  it("returns null for unsupported status", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: 999999,
-      managerName: "Людмила"
-    });
-
-    expect(result).toBeNull();
-  });
-
-  it("returns null for unknown manager on capture statuses", () => {
-    const result = buildAmoKpiPatch({
-      lead: buildLead(),
-      statusId: AMO_STATUS.MEASURE,
-      managerName: null
-    });
-
-    expect(result).toBeNull();
-  });
-
-  it("is idempotent for repeated work status processing", () => {
-    const lead = buildLead();
-
-    const first = buildAmoKpiPatch({
-      lead,
-      statusId: AMO_STATUS.WORK,
-      managerName: "Людмила"
-    });
-    const second = buildAmoKpiPatch({
-      lead,
-      statusId: AMO_STATUS.WORK,
-      managerName: "Людмила"
-    });
-
-    expect(first).toEqual(second);
+  it("requests history only for eligible stages missing capture metadata", () => {
+    expect(missingKpiHistoryStages(lead, null)).toEqual(["measure", "install"]);
+    expect(missingKpiHistoryStages({...lead, kpiFields: { measure: { date: "28.10.2026", manager: "Филипп", amount: 0 } }}, null)).toEqual(["measure", "install"]);
+    expect(missingKpiHistoryStages({...lead, statusId: AMO_STATUS.REFUSED}, null)).toEqual([]);
   });
 });

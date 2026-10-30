@@ -1,11 +1,14 @@
 import {
   AMOCRM_ACCOUNT_BASE_URL,
+  KPI_FIELD_IDS,
+  KPI_STAGE_ORDER,
   TYPE_OBJECT_FIELD_ID
 } from "@/lib/constants/amocrm";
 import { getServerEnv } from "@/lib/env";
 import { AmoLeadSnapshot, AmoFieldMutation } from "@/lib/types";
+import { AmoHistoryEvent, resolveLeadStageHistory } from "@/lib/domain/amocrm-kpi";
 import { sleep } from "@/lib/utils/sleep";
-import { displayDateToUnix } from "@/lib/utils/datetime";
+import { displayDateToUnix, formatDisplayDate } from "@/lib/utils/datetime";
 
 interface AmoLeadResponse {
   id: number;
@@ -171,8 +174,41 @@ export async function fetchLead(leadId: number): Promise<AmoLeadSnapshot> {
     statusId: lead.status_id,
     responsibleUserId: lead.responsible_user_id,
     objectType: extractObjectType(lead),
+    kpiFields: Object.fromEntries(KPI_STAGE_ORDER.map((stage) => {
+      const fields = KPI_FIELD_IDS[stage];
+      const value = (id: number) => lead.custom_fields_values?.find((f) => f.field_id === id)?.values[0]?.value;
+      const date = Number(value(fields.date));
+      const manager = value(fields.manager);
+      const money = value(fields.money);
+      return [stage, {
+        date: Number.isFinite(date) && date > 0 ? formatDisplayDate(new Date(date * 1000)) : null,
+        manager: typeof manager === "string" && manager.trim() ? manager : null,
+        amount: money !== undefined && money !== "" && Number.isFinite(Number(money)) ? Number(money) : null
+      }];
+    })),
     link: `${AMOCRM_ACCOUNT_BASE_URL}/leads/detail/${lead.id}`
   };
+}
+
+export async function fetchLeadKpiHistory(lead: AmoLeadSnapshot): Promise<NonNullable<AmoLeadSnapshot["stageHistory"]>> {
+  const events: AmoHistoryEvent[] = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const query = new URLSearchParams({
+      "filter[entity][]": "lead",
+      "filter[entity_id][]": String(lead.id),
+      limit: "250",
+      page: String(page)
+    });
+    query.append("filter[type][]", "lead_status_changed");
+    query.append("filter[type][]", "entity_responsible_changed");
+    const response = await amoFetch(`/api/v4/events?${query}`);
+    if (response.status === 204) break;
+    const data = await response.json() as { _embedded?: { events?: AmoHistoryEvent[] }; _links?: { next?: unknown } };
+    events.push(...(data._embedded?.events ?? []));
+    if (!data._links?.next) return resolveLeadStageHistory(lead, events) ?? {};
+    if (page === 100) throw new Error(`amoCRM history pagination limit exceeded for lead ${lead.id}`);
+  }
+  return resolveLeadStageHistory(lead, events) ?? {};
 }
 
 export async function fetchUserName(userId: number | null): Promise<string> {

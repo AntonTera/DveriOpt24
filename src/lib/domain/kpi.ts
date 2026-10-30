@@ -21,19 +21,24 @@ import { formatDisplayDate, formatDisplayTime } from "@/lib/utils/datetime";
 function buildStageRecord(
   stage: KpiStage,
   amount: number,
+  lead: AmoLeadSnapshot,
   previousState: StoredDealState | null,
   processedAt: string,
   managerName: string
 ): ActiveKpiRecord {
   const previous = previousState?.active_kpis?.[stage];
+  const captured = lead.kpiFields?.[stage];
+  const history = lead.stageHistory?.[stage];
+  const row = previousState?.kp_rows[stage]?.payload ?? previousState?.zp_rows[stage]?.payload;
+  const occurredAt = history?.occurredAt ?? processedAt;
 
   return {
     stage,
     label: KPI_STAGE_META[stage].label,
     amount,
-    date: previous?.date ?? formatDisplayDate(processedAt),
-    time: previous?.time ?? formatDisplayTime(processedAt),
-    manager: previous?.manager ?? managerName
+    date: captured?.date ?? previous?.date ?? row?.date ?? formatDisplayDate(occurredAt),
+    time: previous?.time ?? row?.time ?? formatDisplayTime(occurredAt),
+    manager: captured?.manager ?? previous?.manager ?? history?.manager ?? managerName
   };
 }
 
@@ -56,7 +61,11 @@ function areSheetRowsEqual(left: SheetRowPayload | undefined, right: SheetRowPay
     return false;
   }
 
-  return JSON.stringify(left) === JSON.stringify(right);
+  // JSONB does not preserve property order when rows are read back from Postgres.
+  const keys: Array<keyof SheetRowPayload> = [
+    "stage", "date", "time", "kpiLabel", "leadName", "amount", "link", "dealId", "installDate"
+  ];
+  return keys.every((key) => left[key] === right[key]);
 }
 
 function calculateKpiAmount(budget: number): number {
@@ -90,21 +99,25 @@ function buildActiveKpis(
       continue;
     }
 
-    activeKpis[stage] = buildStageRecord(stage, amount, previousState, processedAt, managerName);
+    activeKpis[stage] = buildStageRecord(stage, amount, lead, previousState, processedAt, managerName);
   }
 
   return activeKpis;
 }
 
 function buildAmoFieldPatch(
+  lead: AmoLeadSnapshot,
   previousState: StoredDealState | null,
   nextActiveKpis: Partial<Record<KpiStage, ActiveKpiRecord>>,
-  isRefused: boolean
+  isRefused: boolean,
+  processedAt: string,
+  managerName: string
 ): AmoFieldMutation[] {
   const mutations: AmoFieldMutation[] = [];
 
   for (const stage of KPI_STAGE_ORDER) {
-    const previous = previousState?.active_kpis?.[stage];
+    // Compare with actual CRM fields so a retry can also repair partial syncs.
+    const previous = lead.kpiFields !== undefined ? lead.kpiFields[stage] : previousState?.active_kpis?.[stage];
     const next = nextActiveKpis[stage];
     const { fieldIds } = KPI_STAGE_META[stage];
 
@@ -132,7 +145,18 @@ function buildAmoFieldPatch(
       continue;
     }
 
-    if (previous || isRefused) {
+    // Keep capture dates/managers even for stages that do not pay for this object type.
+    if (!isRefused && !previousState?.is_frozen && lead.statusId === KPI_STAGE_META[stage].reachedStatusId) {
+      const history = lead.stageHistory?.[stage];
+      if (!previous?.date) {
+        mutations.push({ fieldId: fieldIds.date, value: formatDisplayDate(history?.occurredAt ?? processedAt) });
+      }
+      if (!previous?.manager) {
+        mutations.push({ fieldId: fieldIds.manager, value: history?.manager ?? managerName });
+      }
+    }
+
+    if (previous?.amount !== 0 && (previous || isRefused || lead.kpiFields !== undefined)) {
       mutations.push({
         fieldId: fieldIds.money,
         value: 0
@@ -204,8 +228,10 @@ export function deriveLeadKpiState(params: {
     activeKpis = buildActiveKpis(lead, previousState, processedAt, managerName);
   }
 
-  const amoFieldsPatch = buildAmoFieldPatch(previousState, activeKpis, isRefused);
-  const includeSalaryRows = !isRefused && SALARY_TRIGGER_STATUS_IDS.has(lead.statusId);
+  const amoFieldsPatch = buildAmoFieldPatch(lead, previousState, activeKpis, isRefused, processedAt, managerName);
+  const includeSalaryRows = !isRefused && (
+    SALARY_TRIGGER_STATUS_IDS.has(lead.statusId) || Object.keys(previousState?.zp_rows ?? {}).length > 0
+  );
 
   return {
     dealId: lead.id,
