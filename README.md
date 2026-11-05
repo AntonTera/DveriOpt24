@@ -64,27 +64,23 @@ npm run dev
 - [supabase/migrations/0003_add_queue_history_cleanup.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0003_add_queue_history_cleanup.sql)
 - [supabase/migrations/0004_add_sheet_job_history_cleanup.sql](/Users/antonterentev/Documents/DveriOpt24/supabase/migrations/0004_add_sheet_job_history_cleanup.sql)
 
-## Запуск очереди через n8n
+## Запуск очереди в Coolify
 
-На бесплатном плане Vercel cron нельзя запускать чаще одного раза в день, поэтому этот проект рассчитан на внешний триггер из `n8n`.
+В production очередь запускает задача `DveriOpt24 Process Queue` в разделе **Scheduled Tasks** приложения `dveriopt24`. Она вызывает обработчик внутри контейнера, без запроса через внешний домен.
 
-Что настроить:
+- Расписание: `* * * * *` (раз в минуту).
+- Timeout: `180` секунд. Поле Container оставьте пустым для приложения с одним контейнером.
+- В окружении приложения должен быть задан `CRON_SECRET`. Не вставляйте его значение в команду задачи.
 
-1. Добавить в Vercel переменную `CRON_SECRET`.
-2. В `n8n` создать `Schedule Trigger`.
-3. После него вызвать `GET` или `POST` на endpoint:
+Команда (не более 255 символов в используемой версии Coolify):
 
-```text
-https://<your-project>.vercel.app/api/cron/process-queue
+```sh
+node -e 'fetch("http://127.0.0.1:3000/api/cron/process-queue",{method:"POST",headers:{Authorization:"Bearer "+process.env.CRON_SECRET},signal:AbortSignal.timeout(150000)}).then(async r=>{if(!r.ok)throw Error(r.status);console.log(await r.text())})'
 ```
 
-4. Передать заголовок:
+После настройки проверьте в **Executions**, что автоматический запуск завершился со статусом `Success`, а ответ содержит `"ok":true`. Нулевые счётчики нормальны, когда очередь пуста.
 
-```text
-Authorization: Bearer <CRON_SECRET>
-```
-
-Рекомендуемый интервал в `n8n`: раз в 1-5 минут.
+Прежний workflow `DveriOpt24 - Process Queue Cron` в n8n отключён и сохранён для отката. Если нужно вернуться к n8n, сначала отключите задачу Coolify и дождитесь завершения текущего запуска, затем включите workflow.
 
 ## Retention очереди
 
@@ -113,7 +109,7 @@ Authorization: Bearer <CRON_SECRET>
 
 - в проекте нужен `CRON_SECRET`
 - файл [vercel.json](/Users/antonterentev/Documents/DveriOpt24/vercel.json) больше не содержит встроенный Vercel Cron
-- очередь запускается внешним scheduler-ом, например `n8n`
+- при развёртывании вне Coolify настройте отдельный планировщик для `POST /api/cron/process-queue` с заголовком `Authorization: Bearer <CRON_SECRET>`
 
 ## Важно по безопасности
 
