@@ -41,7 +41,11 @@ const RETRYABLE_AMOCRM_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 let amoRequestQueue: Promise<void> = Promise.resolve();
 let nextAllowedAmoRequestAt = 0;
 
-class AmoCrmResponseError extends Error {}
+export class AmoCrmResponseError extends Error {
+  constructor(readonly status: number, body: string) {
+    super(`amoCRM request failed (${status}): ${body}`);
+  }
+}
 
 function getRetryDelayMs(attempt: number, retryAfterHeader: string | null) {
   const env = getServerEnv();
@@ -93,11 +97,13 @@ function isRetryableAmoFetchError(error: unknown) {
   return error instanceof Error;
 }
 
-async function amoFetch(path: string, init?: RequestInit) {
+export async function amoFetch(path: string, init?: RequestInit, { retry = true } = {}) {
   const env = getServerEnv();
+  const maxRetries = retry ? env.AMOCRM_MAX_RETRIES : 0;
   let attempt = 0;
 
-  while (attempt <= env.AMOCRM_MAX_RETRIES) {
+  while (attempt <= maxRetries) {
+    init?.signal?.throwIfAborted();
     attempt += 1;
 
     try {
@@ -119,20 +125,20 @@ async function amoFetch(path: string, init?: RequestInit) {
       const body = await response.text();
       const canRetry =
         RETRYABLE_AMOCRM_STATUS_CODES.has(response.status) &&
-        attempt <= env.AMOCRM_MAX_RETRIES;
+        !init?.signal?.aborted && attempt <= maxRetries;
 
       if (canRetry) {
         await sleep(getRetryDelayMs(attempt, response.headers.get("retry-after")));
         continue;
       }
 
-      throw new AmoCrmResponseError(`amoCRM request failed (${response.status}): ${body}`);
+      throw new AmoCrmResponseError(response.status, body);
     } catch (error) {
       if (error instanceof AmoCrmResponseError) {
         throw error;
       }
 
-      const canRetry = isRetryableAmoFetchError(error) && attempt <= env.AMOCRM_MAX_RETRIES;
+      const canRetry = isRetryableAmoFetchError(error) && !init?.signal?.aborted && attempt <= maxRetries;
 
       if (canRetry) {
         await sleep(getRetryDelayMs(attempt, null));

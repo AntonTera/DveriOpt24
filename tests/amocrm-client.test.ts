@@ -16,6 +16,7 @@ vi.mock("@/lib/utils/sleep", () => ({
 }));
 
 import { fetchLead, patchLeadCustomFields, resetAmoClientStateForTests } from "@/lib/amocrm/client";
+import { createRoutingCrm } from "@/lib/routing/crm";
 import { sleep } from "@/lib/utils/sleep";
 
 const sleepMock = vi.mocked(sleep);
@@ -87,6 +88,34 @@ describe("amocrm client retries", () => {
 
     await expect(fetchLead(42)).rejects.toThrow("amoCRM request failed (400)");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([new TypeError("fetch failed"), makeJsonResponse("unavailable", 503)])(
+    "does not retry an uncertain reply task creation: %s", async (failure) => {
+      const fetchMock = vi.fn();
+      if (failure instanceof Error) fetchMock.mockRejectedValue(failure);
+      else fetchMock.mockResolvedValue(failure);
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(createRoutingCrm().createReplyTask(42, 7268314, "Reply", 1776410000)).rejects.toThrow();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({
+        method: "POST",
+        body: JSON.stringify([{
+          entity_type: "leads", entity_id: 42, responsible_user_id: 7268314, text: "Reply", complete_till: 1776410000
+        }])
+      });
+    }
+  );
+
+  it("only confirms a reply task creation with an assigned task ID", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeJsonResponse({ _embedded: { tasks: [{ id: 5 }] } }))
+      .mockResolvedValueOnce(makeJsonResponse({ _embedded: { tasks: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const crm = createRoutingCrm();
+    await expect(crm.createReplyTask(42, 7268314, "Reply", 1776410000)).resolves.toBeUndefined();
+    await expect(crm.createReplyTask(42, 7268314, "Reply", 1776410000)).rejects.toThrow("not confirmed");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
