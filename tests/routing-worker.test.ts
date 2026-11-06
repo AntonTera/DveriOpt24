@@ -23,7 +23,7 @@ vi.mock("@/lib/routing/handlers", async (importOriginal) => ({
 vi.mock("@/lib/routing/repository", () => ({
   claimRoutingJob: mocks.claim,
   finishRoutingJob: mocks.finish,
-  markReplyPosting: mocks.posting,
+  markRoutingPosting: mocks.posting,
   enqueueRoutingJobs: mocks.enqueue,
   cleanupRoutingJobs: mocks.cleanup
 }));
@@ -71,7 +71,9 @@ describe("routing worker", () => {
     mocks.claim.mockResolvedValueOnce(dateJob).mockResolvedValueOnce(message);
     mocks.syncCloseDate.mockResolvedValueOnce({ status: "processed" });
     expect(await processRoutingQueue(10_000)).toMatchObject({ processed: 1, skipped: 1 });
-    expect(mocks.syncCloseDate).toHaveBeenCalledWith(dateJob.payload, expect.any(Object), expect.any(Function));
+    expect(mocks.syncCloseDate).toHaveBeenCalledWith(dateJob.payload, expect.any(Object), expect.objectContaining({
+      assertRunning: expect.any(Function), beforeWrite: expect.any(Function)
+    }));
     expect(mocks.handle).not.toHaveBeenCalled();
     expect(mocks.enqueue).not.toHaveBeenCalled();
     expect(mocks.finish).toHaveBeenCalledWith(message, { status: "skipped", reason: "routing_disabled" });

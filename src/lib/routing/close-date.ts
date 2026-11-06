@@ -7,6 +7,7 @@ const CLOSE_DATE_FIELD_ID = 1170151;
 const EVENT_TYPE = `custom_field_${CLOSE_DATE_FIELD_ID}_value_changed`;
 const EVENT_TOLERANCE_SECONDS = 2;
 const MAX_JOBS = 100;
+const CLOSE_DATE_NOTE = "\u0414\u0430\u0442\u0430 \u0437\u0430\u043a\u0440\u044b\u0442\u0438\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0430";
 
 export type CloseDateJob = { kind: "close-date"; leadId: number; updatedAt: number };
 type CloseDateLead = {
@@ -17,7 +18,9 @@ export type CloseDateCrm = {
   getCloseDateLead: (id: number) => Promise<CloseDateLead | null>;
   findCloseDateChanges: (id: number, updatedAt: number) => Promise<CloseDateChange[]>;
   setCloseDate: (id: number, closedAt: number) => Promise<void>;
+  addCloseDateNote: (id: number) => Promise<void>;
 };
+type WriteGuard = { assertRunning: () => void; beforeWrite: () => Promise<void> };
 
 function positiveInteger(value: unknown): number | null {
   const n = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
@@ -77,7 +80,7 @@ function sameDay(a: number | null, b: number) {
   return a !== null && formatDisplayDate(new Date(a * 1_000)) === formatDisplayDate(new Date(b * 1_000));
 }
 
-export async function syncCloseDate(job: CloseDateJob, crm: CloseDateCrm, assertRunning: () => void) {
+export async function syncCloseDate(job: CloseDateJob, crm: CloseDateCrm, { assertRunning, beforeWrite }: WriteGuard) {
   const skip = (reason: string) => ({ status: "skipped", reason } as const);
   const lead = await crm.getCloseDateLead(job.leadId);
   if (!isClosedInMainPipeline(lead)) return skip("lead_not_closed_in_main_pipeline");
@@ -93,8 +96,25 @@ export async function syncCloseDate(job: CloseDateJob, crm: CloseDateCrm, assert
   const current = await crm.getCloseDateLead(job.leadId);
   if (!isClosedInMainPipeline(current) || current.customDate !== lead.customDate) return skip("close_date_no_longer_current");
   if (sameDay(current.closedAt, current.customDate)) return skip("close_date_already_current");
+
   assertRunning();
-  await crm.setCloseDate(current.id, current.customDate);
+  await beforeWrite();
+  try {
+    assertRunning();
+    await crm.setCloseDate(current.id, current.customDate);
+    const updated = await crm.getCloseDateLead(current.id);
+    if (!isClosedInMainPipeline(updated) || !sameDay(updated.closedAt, current.customDate)) {
+      return { status: "needs_review", reason: "close_date_update_unconfirmed" } as const;
+    }
+  } catch {
+    return { status: "needs_review", reason: "close_date_update_unconfirmed" } as const;
+  }
+  try {
+    assertRunning();
+    await crm.addCloseDateNote(current.id);
+  } catch {
+    return { status: "needs_review", reason: "close_date_note_unconfirmed" } as const;
+  }
   return { status: "processed" } as const;
 }
 
@@ -149,6 +169,13 @@ export function createCloseDateCrm(signal: AbortSignal): CloseDateCrm {
         ...init, method: "PATCH", body: JSON.stringify({ closed_at: closedAt })
       }, { retry: false });
       await response.body?.cancel();
+    },
+    async addCloseDateNote(id) {
+      const response = await amoFetch(`/api/v4/leads/${id}/notes`, {
+        ...init, method: "POST", body: JSON.stringify([{ note_type: "common", params: { text: CLOSE_DATE_NOTE } }])
+      }, { retry: false });
+      const result = await response.json() as { _embedded?: { notes?: { id?: unknown }[] } };
+      if (!positiveInteger(result._embedded?.notes?.[0]?.id)) throw new Error("Close date note was not confirmed");
     }
   };
 }

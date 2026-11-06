@@ -4,7 +4,7 @@ import { createCloseDateCrm, syncCloseDate } from "./close-date";
 import { getDutyConfig, isCloseDateEnabled, isRoutingEnabled, isShiftRotationEnabled } from "./config";
 import { createRoutingCrm } from "./crm";
 import { handleRoutingWork } from "./handlers";
-import { claimRoutingJob, cleanupRoutingJobs, enqueueRoutingJobs, finishRoutingJob, markReplyPosting } from "./repository";
+import { claimRoutingJob, cleanupRoutingJobs, enqueueRoutingJobs, finishRoutingJob, markRoutingPosting } from "./repository";
 import { createDutyLookup } from "./schedule";
 
 function safeJobError(error: unknown, signal: AbortSignal) {
@@ -44,12 +44,16 @@ export async function processRoutingQueue(budgetMs: number) {
       signal.throwIfAborted();
       if (Date.now() >= Date.parse(job.lease_until)) throw new Error("Routing claim expired");
     };
+    const beforeWrite = async () => {
+      await markRoutingPosting(job, signal);
+      posting = true;
+    };
     let result: Parameters<typeof finishRoutingJob>[1];
     try {
       const work = job.payload;
       if (work.kind === "close-date") {
         result = closeDateEnabled
-          ? await syncCloseDate(work, createCloseDateCrm(signal), assertRunning)
+          ? await syncCloseDate(work, createCloseDateCrm(signal), { assertRunning, beforeWrite })
           : { status: "skipped", reason: "close_date_disabled" };
       } else if (!routingEnabled) {
         result = { status: "skipped", reason: "routing_disabled" };
@@ -60,10 +64,7 @@ export async function processRoutingQueue(budgetMs: number) {
         result = await handleRoutingWork(work, {
           crm, now, dutyOwnerIds: config.dutyOwnerIds, getDutyOwner: () => getDutyOwner(now),
           enqueue: (jobs) => enqueueRoutingJobs(jobs, signal),
-          beforeCreateReply: async () => {
-            await markReplyPosting(job, signal);
-            posting = true;
-          },
+          beforeCreateReply: beforeWrite,
           assertRunning
         });
       }

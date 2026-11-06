@@ -28,7 +28,7 @@ async function updateClaim(job: RoutingClaim, patch: object, signal: AbortSignal
   if (error || !data) throw new Error("Routing claim update failed");
 }
 
-export function markReplyPosting(job: RoutingClaim, signal: AbortSignal) {
+export function markRoutingPosting(job: RoutingClaim, signal: AbortSignal) {
   return updateClaim(job, { posting: true }, signal);
 }
 
