@@ -1,6 +1,7 @@
 import { AmoCrmResponseError } from "@/lib/amocrm/client";
 import { formatDisplayDate, formatDisplayTime } from "@/lib/utils/datetime";
-import { getDutyConfig, isShiftRotationEnabled } from "./config";
+import { createCloseDateCrm, syncCloseDate } from "./close-date";
+import { getDutyConfig, isCloseDateEnabled, isRoutingEnabled, isShiftRotationEnabled } from "./config";
 import { createRoutingCrm } from "./crm";
 import { handleRoutingWork } from "./handlers";
 import { claimRoutingJob, cleanupRoutingJobs, enqueueRoutingJobs, finishRoutingJob, markReplyPosting } from "./repository";
@@ -12,14 +13,20 @@ function safeJobError(error: unknown, signal: AbortSignal) {
   return "routing_dependency_failed";
 }
 
-export async function processRoutingQueue(budgetMs: number) {
+function buildRoutingContext(signal: AbortSignal) {
   const config = getDutyConfig();
-  const signal = AbortSignal.timeout(budgetMs);
   const crm = createRoutingCrm(signal);
-  const getDutyOwner = createDutyLookup(config, crm, signal);
+  return { config, crm, getDutyOwner: createDutyLookup(config, crm, signal) };
+}
+
+export async function processRoutingQueue(budgetMs: number) {
+  const signal = AbortSignal.timeout(budgetMs);
+  let routing: ReturnType<typeof buildRoutingContext> | undefined;
   const stats = { processed: 0, skipped: 0, retry: 0, failed: 0, needs_review: 0, cleaned: 0 };
   const start = new Date();
-  const rotationEnabled = isShiftRotationEnabled();
+  const routingEnabled = isRoutingEnabled();
+  const closeDateEnabled = isCloseDateEnabled();
+  const rotationEnabled = routingEnabled && isShiftRotationEnabled();
   if (rotationEnabled && /^03:0[0-4]$/.test(formatDisplayTime(start))) {
     const day = formatDisplayDate(start);
     await enqueueRoutingJobs([{
@@ -39,10 +46,18 @@ export async function processRoutingQueue(budgetMs: number) {
     };
     let result: Parameters<typeof finishRoutingJob>[1];
     try {
-      const shiftJob = job.payload.kind === "shift-scan" || job.payload.kind === "shift-lead";
-      result = shiftJob && !rotationEnabled
-        ? { status: "skipped", reason: "shift_rotation_disabled" }
-        : await handleRoutingWork(job.payload, {
+      const work = job.payload;
+      if (work.kind === "close-date") {
+        result = closeDateEnabled
+          ? await syncCloseDate(work, createCloseDateCrm(signal), assertRunning)
+          : { status: "skipped", reason: "close_date_disabled" };
+      } else if (!routingEnabled) {
+        result = { status: "skipped", reason: "routing_disabled" };
+      } else if ((work.kind === "shift-scan" || work.kind === "shift-lead") && !rotationEnabled) {
+        result = { status: "skipped", reason: "shift_rotation_disabled" };
+      } else {
+        const { config, crm, getDutyOwner } = routing ??= buildRoutingContext(signal);
+        result = await handleRoutingWork(work, {
           crm, now, dutyOwnerIds: config.dutyOwnerIds, getDutyOwner: () => getDutyOwner(now),
           enqueue: (jobs) => enqueueRoutingJobs(jobs, signal),
           beforeCreateReply: async () => {
@@ -51,6 +66,7 @@ export async function processRoutingQueue(budgetMs: number) {
           },
           assertRunning
         });
+      }
     } catch (error) {
       result = {
         status: posting ? "needs_review" : job.attempts >= 5 ? "failed" : "retry",

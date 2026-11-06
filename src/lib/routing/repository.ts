@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import type { RoutingEnqueueJob, RoutingWork } from "./handlers";
+import type { RoutingEnqueueJob } from "./handlers";
 
-export type RoutingClaim = { id: string; payload: RoutingWork; attempts: number; claim_token: string; lease_until: string };
+export type RoutingClaim = { id: string; payload: RoutingEnqueueJob["payload"]; attempts: number; claim_token: string; lease_until: string };
 type RoutingFinish = {
   status: "processed" | "skipped" | "retry" | "failed" | "needs_review";
   reason?: string;

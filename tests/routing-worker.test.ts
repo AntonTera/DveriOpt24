@@ -8,9 +8,14 @@ const mocks = vi.hoisted(() => ({
   posting: vi.fn(),
   enqueue: vi.fn(),
   cleanup: vi.fn(),
-  handle: vi.fn()
+  handle: vi.fn(),
+  syncCloseDate: vi.fn()
 }));
 
+vi.mock("@/lib/routing/close-date", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/routing/close-date")>(),
+  syncCloseDate: mocks.syncCloseDate
+}));
 vi.mock("@/lib/routing/handlers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/routing/handlers")>(),
   handleRoutingWork: mocks.handle
@@ -34,6 +39,8 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-11-05T00:02:00Z"));
   vi.stubEnv("CRM_SHIFT_SPREADSHEET_ID", "test-sheet");
   vi.stubEnv("CRM_SVETLANA_USER_ID", "");
+  vi.stubEnv("CRM_ROUTING_ENABLED", "true");
+  vi.stubEnv("CRM_CLOSE_DATE_ENABLED", "false");
   vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "false");
   mocks.claim.mockResolvedValue(null);
   mocks.cleanup.mockResolvedValue(0);
@@ -44,6 +51,32 @@ afterEach(() => {
 });
 
 describe("routing worker", () => {
+  const dateJob = {
+    ...message, id: "close-date-job",
+    payload: { kind: "close-date", leadId: 42, updatedAt: 1793836920 }
+  };
+
+  it("does not process a date job when its switch is off", async () => {
+    mocks.claim.mockResolvedValueOnce(dateJob);
+    expect(await processRoutingQueue(10_000)).toMatchObject({ skipped: 1 });
+    expect(mocks.syncCloseDate).not.toHaveBeenCalled();
+    expect(mocks.finish).toHaveBeenCalledWith(dateJob, { status: "skipped", reason: "close_date_disabled" });
+  });
+
+  it("processes a date job without a shift sheet and without enabling other routing", async () => {
+    vi.stubEnv("CRM_ROUTING_ENABLED", "false");
+    vi.stubEnv("CRM_CLOSE_DATE_ENABLED", "true");
+    vi.stubEnv("CRM_SHIFT_SPREADSHEET_ID", "");
+    vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "true");
+    mocks.claim.mockResolvedValueOnce(dateJob).mockResolvedValueOnce(message);
+    mocks.syncCloseDate.mockResolvedValueOnce({ status: "processed" });
+    expect(await processRoutingQueue(10_000)).toMatchObject({ processed: 1, skipped: 1 });
+    expect(mocks.syncCloseDate).toHaveBeenCalledWith(dateJob.payload, expect.any(Object), expect.any(Function));
+    expect(mocks.handle).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.finish).toHaveBeenCalledWith(message, { status: "skipped", reason: "routing_disabled" });
+  });
+
   it("only schedules a rotation during the Moscow window and uses one key for the day", async () => {
     vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "true");
     await processRoutingQueue(10_000);

@@ -5,6 +5,7 @@ import { PHILIPP_ID } from "./roster";
 
 export const isRoutingEnabled = () => process.env.CRM_ROUTING_ENABLED === "true";
 export const isShiftRotationEnabled = () => process.env.CRM_SHIFT_ROTATION_ENABLED === "true";
+export const isCloseDateEnabled = () => process.env.CRM_CLOSE_DATE_ENABLED === "true";
 
 export function getDutyConfig() {
   const spreadsheetId = process.env.CRM_SHIFT_SPREADSHEET_ID?.trim();

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/webhooks/amocrm-routing/route";
+import { POST as closeDatePost } from "@/app/api/webhooks/amocrm-close-date/route";
 import { GET as preview } from "@/app/api/routing/shift-preview/route";
 import { processQueue } from "@/lib/services/process-queue";
 
@@ -40,6 +41,8 @@ beforeEach(() => {
   mocks.claimWebhookEvents.mockResolvedValue([]);
   vi.stubEnv("CRM_ROUTING_ENABLED", "");
   vi.stubEnv("CRM_ROUTING_WEBHOOK_SECRET", "");
+  vi.stubEnv("CRM_CLOSE_DATE_ENABLED", "");
+  vi.stubEnv("CRM_CLOSE_DATE_WEBHOOK_SECRET", "");
   vi.stubEnv("CRM_SHIFT_SPREADSHEET_ID", "test-spreadsheet");
   vi.stubEnv("CRM_SVETLANA_USER_ID", "");
   vi.stubEnv("CRON_SECRET", "");
@@ -72,6 +75,23 @@ describe("routing webhook", () => {
   });
 });
 
+describe("close date webhook", () => {
+  it("has its own flag and secret, independent from other routing", async () => {
+    vi.stubEnv("CRM_ROUTING_WEBHOOK_SECRET", "routing-secret");
+    vi.stubEnv("CRM_CLOSE_DATE_WEBHOOK_SECRET", "date-secret");
+    const time = Math.floor(Date.now() / 1000);
+    const body = `leads[update][0][id]=42&leads[update][0][last_modified]=${time}`;
+    expect((await closeDatePost(request("date-secret", body))).status).toBe(404);
+    vi.stubEnv("CRM_CLOSE_DATE_ENABLED", "true");
+    expect((await closeDatePost(request("routing-secret", body))).status).toBe(401);
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(await (await closeDatePost(request("date-secret", body))).json()).toEqual({ ok: true, accepted: 1 });
+    expect(mocks.enqueue).toHaveBeenCalledWith([expect.objectContaining({
+      payload: { kind: "close-date", leadId: 42, updatedAt: time }
+    })]);
+  });
+});
+
 describe("routing cron and preview", () => {
   it("does not call the routing worker unless explicitly enabled", async () => {
     vi.stubEnv("CRM_ROUTING_ENABLED", "1");
@@ -86,6 +106,12 @@ describe("routing cron and preview", () => {
     expect(await processQueue()).toMatchObject({
       processedWebhookEvents: 0, processedSheetJobs: 0, routing: { error: "routing_queue_failed" }
     });
+  });
+
+  it("drains date jobs without enabling the other scenarios", async () => {
+    vi.stubEnv("CRM_CLOSE_DATE_ENABLED", "true");
+    mocks.processRouting.mockResolvedValueOnce({ processed: 1 });
+    expect(await processQueue()).toMatchObject({ routing: { processed: 1 } });
   });
 
   it("requires authorization and allows read-only preview before enabling routing", async () => {

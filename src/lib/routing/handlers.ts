@@ -2,6 +2,7 @@ import { AMO_STATUS, EXCLUDED_RESPONSIBLE_USER_ID, MAIN_PIPELINE_ID } from "@/li
 import { formatDisplayDate } from "@/lib/utils/datetime";
 import type { RoutingCrm, RoutingLead, RoutingTask } from "./crm";
 import type { RoutingChannel, RoutingEvent } from "./ingress";
+import type { CloseDateJob } from "./close-date";
 
 export const FORMER_DUTY_OWNER_ID = 12043998;
 export const MAX_SHIFT_PAGES = 100;
@@ -20,7 +21,7 @@ export type RoutingWork = RoutingEvent |
   { kind: "shift-scan"; day: string; page: number; ownerId?: number } |
   { kind: "shift-lead"; day: string; leadId: number; ownerId: number };
 
-export type RoutingEnqueueJob = { dedupe_key: string; payload: RoutingWork; next_run_at: string };
+export type RoutingEnqueueJob = { dedupe_key: string; payload: RoutingWork | CloseDateJob; next_run_at: string };
 type ReadCrm = Pick<RoutingCrm, "getLead" | "listLeadTasks" | "getContact" | "listShiftLeads">;
 type ShiftReads = {
   crm: ReadCrm;

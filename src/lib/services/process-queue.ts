@@ -48,7 +48,7 @@ export async function processQueue() {
       sheetJobs: sheetCleanup
     }
   };
-  if (process.env.CRM_ROUTING_ENABLED !== "true") return result;
+  if (process.env.CRM_ROUTING_ENABLED !== "true" && process.env.CRM_CLOSE_DATE_ENABLED !== "true") return result;
 
   const budgetMs = Math.min(20_000, 50_000 - (Date.now() - startedAt));
   if (budgetMs < 4_000) return { ...result, routing: { skipped: "cron_time_budget" } };
