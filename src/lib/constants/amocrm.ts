@@ -66,22 +66,24 @@ export const KPI_FIELD_IDS = {
   }
 } as const;
 
-export const OBJECT_TYPE_RULES: Record<string, Partial<Record<KpiStage, true>>> = {
+type KpiStageRule = { fixedAmount: number } | { budgetRate: number };
+
+export const OBJECT_TYPE_RULES: Record<string, Partial<Record<KpiStage, KpiStageRule>>> = {
   "Входная": {
-    measure: true,
-    install: true
+    measure: { budgetRate: 0.08 },
+    install: { budgetRate: 0.08 }
   },
   "Межкомнатная": {
-    work: true
+    work: { fixedAmount: 100 }
   },
   "Откосы": {
-    work: true
+    work: { fixedAmount: 200 }
   },
   "Козырьки": {
-    work: true
+    work: { fixedAmount: 300 }
   },
   "Входная нестандарт": {
-    work: true
+    work: { fixedAmount: 500 }
   }
 };
 

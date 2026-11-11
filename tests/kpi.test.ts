@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AMO_STATUS, KPI_FIELD_IDS } from "@/lib/constants/amocrm";
 import { deriveLeadKpiState, buildSheetSyncJobs } from "@/lib/domain/kpi";
 import { AmoLeadSnapshot, StoredDealState } from "@/lib/types";
 
@@ -19,17 +20,25 @@ function buildLead(overrides: Partial<AmoLeadSnapshot>): AmoLeadSnapshot {
 }
 
 describe("deriveLeadKpiState", () => {
-  it("creates work KPI for non-standard entrance on work status", () => {
-    const state = deriveLeadKpiState({
-      lead: buildLead({ objectType: "Входная нестандарт", statusId: 44423710 }),
-      previousState: null,
-      processedAt: "2026-04-17T09:00:00.000Z",
-      managerName: "Людмила"
-    });
+  it.each([
+    { objectType: "Межкомнатная", amount: 100 },
+    { objectType: "Откосы", amount: 200 },
+    { objectType: "Козырьки", amount: 300 },
+    { objectType: "Входная нестандарт", amount: 500 }
+  ])("creates fixed work KPI for $objectType regardless of budget", ({ objectType, amount }) => {
+    for (const budget of [0, 12500]) {
+      const state = deriveLeadKpiState({
+        lead: buildLead({ objectType, statusId: AMO_STATUS.WORK, budget }),
+        previousState: null,
+        processedAt: "2026-04-17T09:00:00.000Z",
+        managerName: "Людмила"
+      });
 
-    expect(state.activeKpis.work?.amount).toBe(10000);
-    expect(state.sheetRowsKpNew).toHaveLength(1);
-    expect(state.sheetRowsKpNew[0].kpiLabel).toBe("В работу");
+      expect(Object.keys(state.activeKpis)).toEqual(["work"]);
+      expect(state.activeKpis.work?.amount).toBe(amount);
+      expect(state.amoFieldsPatch).toContainEqual({ fieldId: KPI_FIELD_IDS.work.money, value: amount });
+      expect(state.sheetRowsKpNew).toEqual([expect.objectContaining({ kpiLabel: "В работу", amount })]);
+    }
   });
 
   it("moves active KPI from work to measure/install after object type change", () => {

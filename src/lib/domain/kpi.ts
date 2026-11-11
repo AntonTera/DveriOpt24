@@ -68,10 +68,10 @@ function areSheetRowsEqual(left: SheetRowPayload | undefined, right: SheetRowPay
   return keys.every((key) => left[key] === right[key]);
 }
 
-function calculateKpiAmount(budget: number): number {
+function calculateBudgetKpiAmount(budget: number, rate: number): number {
   const normalizedBudget = Number.isFinite(budget) ? Math.max(0, budget) : 0;
 
-  return Math.round(normalizedBudget * 0.08);
+  return Math.round(normalizedBudget * rate);
 }
 
 function buildActiveKpis(
@@ -88,10 +88,10 @@ function buildActiveKpis(
   }
 
   const statusSort = getStatusSort(lead.statusId);
-  const amount = calculateKpiAmount(lead.budget);
 
   for (const stage of KPI_STAGE_ORDER) {
-    if (!rule[stage]) {
+    const stageRule = rule[stage];
+    if (!stageRule) {
       continue;
     }
 
@@ -99,6 +99,9 @@ function buildActiveKpis(
       continue;
     }
 
+    const amount = "fixedAmount" in stageRule
+      ? stageRule.fixedAmount
+      : calculateBudgetKpiAmount(lead.budget, stageRule.budgetRate);
     activeKpis[stage] = buildStageRecord(stage, amount, lead, previousState, processedAt, managerName);
   }
 
