@@ -25,6 +25,15 @@ export async function getLatestShiftRotation(signal: AbortSignal) {
   return data as { payload: { rotationId: string; day: string; ownerId: number }; status: string } | null;
 }
 
+export async function skipSupersededShiftJobs(day: string, rotationId: string, signal: AbortSignal) {
+  const { error } = await getSupabaseAdmin().from("dveri_opt_routing_jobs")
+    .update({ status: "skipped", result: { status: "skipped", reason: "shift_rotation_superseded" }, last_error: null })
+    .in("status", ["pending", "retry"]).in("payload->>kind", ["shift-scan", "shift-lead"])
+    .eq("payload->>day", day).or(`payload->>rotationId.neq.${rotationId},payload->>rotationId.is.null`)
+    .abortSignal(signal);
+  if (error) throw new Error("Superseded rotation cleanup failed");
+}
+
 export async function getManualShiftRequest(id: string) {
   const { data, error } = await getSupabaseAdmin().from("dveri_opt_routing_jobs")
     .select("status,result").eq("dedupe_key", `shift-request:${id}`)

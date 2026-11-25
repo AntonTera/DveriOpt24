@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   posting: vi.fn(),
   enqueue: vi.fn(),
   latestRotation: vi.fn(),
+  skipSuperseded: vi.fn(),
   getDutyOwner: vi.fn(),
   cleanup: vi.fn(),
   handle: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("@/lib/routing/repository", () => ({
   markRoutingPosting: mocks.posting,
   enqueueRoutingJobs: mocks.enqueue,
   getLatestShiftRotation: mocks.latestRotation,
+  skipSupersededShiftJobs: mocks.skipSuperseded,
   cleanupRoutingJobs: mocks.cleanup
 }));
 
@@ -109,6 +111,7 @@ describe("routing worker", () => {
     expect(await processRoutingQueue(10_000)).toMatchObject({ skipped: 1 });
     expect(mocks.getDutyOwner).toHaveBeenCalledWith(expect.any(Date), true);
     expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.skipSuperseded).not.toHaveBeenCalled();
     expect(mocks.finish).toHaveBeenCalledWith(job, { status: "skipped", reason: "shift_owner_unchanged" });
   });
 
@@ -125,6 +128,9 @@ describe("routing worker", () => {
       .mockResolvedValueOnce({ payload: { ownerId: 10985322, rotationId: "to-tatiana" }, status: "pending" });
 
     expect(await processRoutingQueue(10_000)).toMatchObject({ processed: 2 });
+    expect(mocks.skipSuperseded.mock.calls.map(([day, id]) => [day, id])).toEqual([
+      ["05.11.2026", "to-tatiana"], ["05.11.2026", "back-to-philipp"]
+    ]);
     expect(mocks.enqueue.mock.calls.map(([jobs]) => jobs[0])).toEqual([
       expect.objectContaining({
         dedupe_key: "shift:05.11.2026:to-tatiana:scan:1",

@@ -4,7 +4,7 @@ import { createCloseDateCrm, syncCloseDate } from "./close-date";
 import { getDutyConfig, isCloseDateEnabled, isRoutingEnabled, isShiftRotationEnabled } from "./config";
 import { createRoutingCrm } from "./crm";
 import { handleRoutingWork, type ShiftRequest } from "./handlers";
-import { claimRoutingJob, cleanupRoutingJobs, enqueueRoutingJobs, finishRoutingJob, getLatestShiftRotation, markRoutingPosting } from "./repository";
+import { claimRoutingJob, cleanupRoutingJobs, enqueueRoutingJobs, finishRoutingJob, getLatestShiftRotation, markRoutingPosting, skipSupersededShiftJobs } from "./repository";
 import { createDutyLookup } from "./schedule";
 
 function safeJobError(error: unknown, signal: AbortSignal) {
@@ -29,8 +29,7 @@ async function startShiftRotation(
 ): Promise<Parameters<typeof finishRoutingJob>[1]> {
   if (!ownerId) return { status: "skipped", reason: "no_duty_owner" };
   const latest = await getLatestShiftRotation(signal);
-  if (latest?.payload.rotationId === rotationId) return { status: "processed", queued: 1 };
-  if (latest?.payload.ownerId === ownerId &&
+  if (latest?.payload.ownerId === ownerId && latest.payload.rotationId !== rotationId &&
       (request.source === "manual" || latest.payload.day === request.day) &&
       ["pending", "processing", "retry", "processed"].includes(latest.status)) {
     return { status: "skipped", reason: "shift_owner_unchanged" };
@@ -38,11 +37,15 @@ async function startShiftRotation(
 
   if (request.day !== formatDisplayDate(new Date())) return { status: "skipped", reason: "shift_date_changed" };
   assertRunning();
-  await enqueueRoutingJobs([{
-    dedupe_key: `shift:${request.day}:${rotationId}:scan:1`,
-    payload: { kind: "shift-scan", day: request.day, page: 1, ownerId, rotationId },
-    next_run_at: now.toISOString()
-  }], signal);
+  if (latest?.payload.rotationId !== rotationId) {
+    await enqueueRoutingJobs([{
+      dedupe_key: `shift:${request.day}:${rotationId}:scan:1`,
+      payload: { kind: "shift-scan", day: request.day, page: 1, ownerId, rotationId },
+      next_run_at: now.toISOString()
+    }], signal);
+  }
+  assertRunning();
+  await skipSupersededShiftJobs(request.day, rotationId, signal);
   return { status: "processed", queued: 1 };
 }
 
