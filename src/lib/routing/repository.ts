@@ -15,6 +15,24 @@ export async function enqueueRoutingJobs(jobs: RoutingEnqueueJob[], signal = Abo
   if (error) throw new Error("Routing enqueue failed");
 }
 
+export async function getLatestShiftRotation(signal: AbortSignal) {
+  const { data, error } = await getSupabaseAdmin().from("dveri_opt_routing_jobs")
+    .select("payload,status").like("dedupe_key", "shift:%:scan:1")
+    .not("payload->>rotationId", "is", null)
+    .order("created_at", { ascending: false }).order("id", { ascending: false })
+    .limit(1).abortSignal(signal).maybeSingle();
+  if (error) throw new Error("Shift rotation lookup failed");
+  return data as { payload: { rotationId: string; day: string; ownerId: number }; status: string } | null;
+}
+
+export async function getManualShiftRequest(id: string) {
+  const { data, error } = await getSupabaseAdmin().from("dveri_opt_routing_jobs")
+    .select("status,result").eq("dedupe_key", `shift-request:${id}`)
+    .abortSignal(AbortSignal.timeout(5_000)).maybeSingle();
+  if (error) throw new Error("Shift request lookup failed");
+  return data as { status: string; result: RoutingFinish | null } | null;
+}
+
 export async function claimRoutingJob(signal: AbortSignal): Promise<RoutingClaim | null> {
   const { data, error } = await getSupabaseAdmin().rpc("dveri_opt_claim_routing_job").abortSignal(signal);
   if (error) throw new Error("Routing claim failed");

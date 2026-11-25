@@ -173,6 +173,22 @@ describe("shift rotation", () => {
     expect(deps.crm.setLeadOwner).not.toHaveBeenCalled();
   });
 
+  it("keeps manual rotation children scoped to their rotation", async () => {
+    const deps = setup();
+    deps.crm.listShiftLeads.mockResolvedValue({ leads: [lead()], hasNext: true });
+    await handleRoutingWork({ kind: "shift-scan", day: DAY, page: 1, rotationId: "manual-run" }, deps);
+    expect(deps.enqueue).toHaveBeenCalledExactlyOnceWith([
+      expect.objectContaining({
+        dedupe_key: `shift:${DAY}:manual-run:lead:10`,
+        payload: expect.objectContaining({ kind: "shift-lead", rotationId: "manual-run" })
+      }),
+      expect.objectContaining({
+        dedupe_key: `shift:${DAY}:manual-run:scan:2`,
+        payload: expect.objectContaining({ kind: "shift-scan", rotationId: "manual-run" })
+      })
+    ]);
+  });
+
   it("transfers the eligible deal, open tasks and unshared first contact", async () => {
     const deps = setup();
     await handleRoutingWork({ kind: "shift-lead", day: DAY, ownerId: PHILIPP, leadId: 10 }, deps);

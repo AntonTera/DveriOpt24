@@ -13,9 +13,9 @@ export function createDutyLookup(
   signal: AbortSignal
 ) {
   let cached: { day: string; ownerId: number | null } | undefined;
-  return async (now: Date) => {
+  return async (now: Date, refresh = false) => {
     const day = formatDisplayDate(now);
-    if (cached?.day === day) return cached.ownerId;
+    if (!refresh && cached?.day === day) return cached.ownerId;
 
     signal.throwIfAborted();
     const env = getServerEnv();

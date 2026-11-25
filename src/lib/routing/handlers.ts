@@ -17,11 +17,13 @@ const REPLY_TASK: Record<RoutingChannel, string> = {
 const CLOSED_STATUSES = new Set<number>([AMO_STATUS.COMMISSION_RECEIVED, AMO_STATUS.REFUSED]);
 const SHIFT_STATUSES = Object.values(AMO_STATUS).filter((status) => !CLOSED_STATUSES.has(status));
 
-export type RoutingWork = RoutingEvent |
-  { kind: "shift-scan"; day: string; page: number; ownerId?: number } |
-  { kind: "shift-lead"; day: string; leadId: number; ownerId: number };
+export type ShiftRequest = { kind: "shift-request"; day: string; source: "nightly" | "manual" };
 
-export type RoutingEnqueueJob = { dedupe_key: string; payload: RoutingWork | CloseDateJob; next_run_at: string };
+export type RoutingWork = RoutingEvent |
+  { kind: "shift-scan"; day: string; page: number; ownerId?: number; rotationId?: string } |
+  { kind: "shift-lead"; day: string; leadId: number; ownerId: number; rotationId?: string };
+
+export type RoutingEnqueueJob = { dedupe_key: string; payload: RoutingWork | ShiftRequest | CloseDateJob; next_run_at: string };
 type ReadCrm = Pick<RoutingCrm, "getLead" | "listLeadTasks" | "getContact" | "listShiftLeads">;
 type ShiftReads = {
   crm: ReadCrm;
@@ -166,16 +168,18 @@ export async function handleRoutingWork(work: RoutingWork, deps: RoutingDependen
 
   if (work.kind === "shift-scan") {
     const { leads, hasNext } = await crm.listShiftLeads(sourceOwners(deps), SHIFT_STATUSES, work.page, 50);
+    const rotation = work.rotationId ? { rotationId: work.rotationId } : {};
+    const key = work.rotationId ? `shift:${work.day}:${work.rotationId}` : `shift:${work.day}`;
     const jobs = leads.filter((lead) => eligibleShiftLead(lead, deps)).map((lead): RoutingEnqueueJob => ({
-      dedupe_key: `shift:${work.day}:lead:${lead.id}`,
-      payload: { kind: "shift-lead", day: work.day, leadId: lead.id, ownerId },
+      dedupe_key: `${key}:lead:${lead.id}`,
+      payload: { kind: "shift-lead", day: work.day, leadId: lead.id, ownerId, ...rotation },
       next_run_at: deps.now.toISOString()
     }));
     if (hasNext && work.page < MAX_SHIFT_PAGES) {
       const page = work.page + 1;
       jobs.push({
-        dedupe_key: `shift:${work.day}:scan:${page}`,
-        payload: { kind: "shift-scan", day: work.day, page, ownerId },
+        dedupe_key: `${key}:scan:${page}`,
+        payload: { kind: "shift-scan", day: work.day, page, ownerId, ...rotation },
         next_run_at: deps.now.toISOString()
       });
     }

@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   finish: vi.fn(),
   posting: vi.fn(),
   enqueue: vi.fn(),
+  latestRotation: vi.fn(),
+  getDutyOwner: vi.fn(),
   cleanup: vi.fn(),
   handle: vi.fn(),
   syncCloseDate: vi.fn()
@@ -20,11 +22,13 @@ vi.mock("@/lib/routing/handlers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/routing/handlers")>(),
   handleRoutingWork: mocks.handle
 }));
+vi.mock("@/lib/routing/schedule", () => ({ createDutyLookup: () => mocks.getDutyOwner }));
 vi.mock("@/lib/routing/repository", () => ({
   claimRoutingJob: mocks.claim,
   finishRoutingJob: mocks.finish,
   markRoutingPosting: mocks.posting,
   enqueueRoutingJobs: mocks.enqueue,
+  getLatestShiftRotation: mocks.latestRotation,
   cleanupRoutingJobs: mocks.cleanup
 }));
 
@@ -43,6 +47,8 @@ beforeEach(() => {
   vi.stubEnv("CRM_CLOSE_DATE_ENABLED", "false");
   vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "false");
   mocks.claim.mockResolvedValue(null);
+  mocks.getDutyOwner.mockResolvedValue(7268314);
+  mocks.latestRotation.mockResolvedValue(null);
   mocks.cleanup.mockResolvedValue(0);
 });
 afterEach(() => {
@@ -90,6 +96,58 @@ describe("routing worker", () => {
     expect(mocks.enqueue.mock.calls.map(([jobs]) => jobs[0].dedupe_key)).toEqual([
       "shift:05.11.2026:scan:1", "shift:05.11.2026:scan:1"
     ]);
+  });
+
+  it("does not restart a manual rotation for the already selected owner", async () => {
+    vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "true");
+    vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
+    const job = { ...message, payload: { kind: "shift-request", day: "05.11.2026", source: "manual" } };
+    mocks.claim.mockResolvedValueOnce(job);
+    mocks.latestRotation.mockResolvedValueOnce({
+      payload: { day: "05.11.2026", ownerId: 7268314, rotationId: "previous" }, status: "processed"
+    });
+    expect(await processRoutingQueue(10_000)).toMatchObject({ skipped: 1 });
+    expect(mocks.getDutyOwner).toHaveBeenCalledWith(expect.any(Date), true);
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.finish).toHaveBeenCalledWith(job, { status: "skipped", reason: "shift_owner_unchanged" });
+  });
+
+  it("queues a new rotation in each direction when the schedule changes twice in a day", async () => {
+    vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "true");
+    vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
+    const request = { ...message, lease_until: "2026-11-05T12:05:00Z",
+      payload: { kind: "shift-request", day: "05.11.2026", source: "manual" } };
+    mocks.claim.mockResolvedValueOnce({ ...request, id: "to-tatiana" })
+      .mockResolvedValueOnce({ ...request, id: "back-to-philipp" });
+    mocks.getDutyOwner.mockResolvedValueOnce(10985322).mockResolvedValueOnce(7268314);
+    mocks.latestRotation
+      .mockResolvedValueOnce({ payload: { ownerId: 7268314, rotationId: "nightly" }, status: "processed" })
+      .mockResolvedValueOnce({ payload: { ownerId: 10985322, rotationId: "to-tatiana" }, status: "pending" });
+
+    expect(await processRoutingQueue(10_000)).toMatchObject({ processed: 2 });
+    expect(mocks.enqueue.mock.calls.map(([jobs]) => jobs[0])).toEqual([
+      expect.objectContaining({
+        dedupe_key: "shift:05.11.2026:to-tatiana:scan:1",
+        payload: { kind: "shift-scan", day: "05.11.2026", page: 1, ownerId: 10985322, rotationId: "to-tatiana" }
+      }),
+      expect.objectContaining({
+        dedupe_key: "shift:05.11.2026:back-to-philipp:scan:1",
+        payload: { kind: "shift-scan", day: "05.11.2026", page: 1, ownerId: 7268314, rotationId: "back-to-philipp" }
+      })
+    ]);
+  });
+
+  it("skips jobs from superseded rotations even if the selected owner returns", async () => {
+    vi.stubEnv("CRM_SHIFT_ROTATION_ENABLED", "true");
+    vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
+    const job = { ...message, payload: {
+      kind: "shift-lead", day: "05.11.2026", leadId: 42, ownerId: 7268314, rotationId: "old"
+    } };
+    mocks.claim.mockResolvedValueOnce(job);
+    mocks.latestRotation.mockResolvedValueOnce({ payload: { ownerId: 7268314, rotationId: "active" } });
+    expect(await processRoutingQueue(10_000)).toMatchObject({ skipped: 1 });
+    expect(mocks.handle).not.toHaveBeenCalled();
+    expect(mocks.finish).toHaveBeenCalledWith(job, { status: "skipped", reason: "shift_rotation_superseded" });
   });
 
   it("does not execute a queued rotation when the separate flag is off", async () => {
