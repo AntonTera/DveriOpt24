@@ -4,6 +4,7 @@ import { selectDutyOwner } from "@/lib/routing/roster";
 const dateColumn = "\u0414\u0430\u0442\u0430";
 const philipp = "\u0424\u0438\u043b\u0438\u043f\u043f";
 const svetlana = "\u0421\u0432\u0435\u0442\u043b\u0430\u043d\u0430";
+const tatiana = "\u0422\u0430\u0442\u044c\u044f\u043d\u0430";
 const header = [dateColumn, philipp, svetlana] as const;
 const day = "05.11.2026";
 const svetlanaId = 12345678;
@@ -19,6 +20,14 @@ describe("selectDutyOwner", () => {
       .toEqual({ ownerId: svetlanaId, column: svetlana });
   });
 
+  it("uses the configured second-shift owner when the roster column is named Tatiana", () => {
+    const renamedHeader = [dateColumn, philipp, tatiana];
+    expect(selectDutyOwner([renamedHeader, [day, "0", "1"]], day, 10985322))
+      .toEqual({ ownerId: 10985322, column: tatiana });
+    expect(selectDutyOwner([renamedHeader, [day, "1", "0"]], day, 10985322))
+      .toEqual({ ownerId: 7268314, column: philipp });
+  });
+
   it("fails closed when the date is absent, malformed, or duplicated", () => {
     expect(selectDutyOwner([header, ["04.11.2026", 1, 0]], day)).toBeNull();
     expect(selectDutyOwner([header, ["2026-11-05", 1, 0]], "2026-11-05")).toBeNull();
@@ -30,6 +39,8 @@ describe("selectDutyOwner", () => {
     expect(selectDutyOwner([[dateColumn, philipp], [day, 1]], day)).toBeNull();
     expect(selectDutyOwner([["date", philipp, svetlana], [day, 1, 0]], day)).toBeNull();
     expect(selectDutyOwner([[dateColumn, philipp, svetlana, philipp], [day, 1, 0, 0]], day)).toBeNull();
+    expect(selectDutyOwner([[dateColumn, philipp, tatiana, tatiana], [day, 1, 0, 0]], day)).toBeNull();
+    expect(selectDutyOwner([[...header, tatiana], [day, 1, 0, 0]], day)).toBeNull();
   });
 
   it.each([[0, ""], [1, "1"], [1, "off"], [1, 2], [true, 0], ["01", 0], [null, undefined]])(
